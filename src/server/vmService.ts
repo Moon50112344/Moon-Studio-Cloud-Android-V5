@@ -534,6 +534,13 @@ class VMService {
       return this.lastFrames.get(id)!;
     }
 
+    const seedPath = path.join(process.cwd(), 'seabios_proof.jpg');
+    if (fs.existsSync(seedPath)) {
+      const seedBuffer = fs.readFileSync(seedPath);
+      this.lastFrames.set(id, seedBuffer);
+      return seedBuffer;
+    }
+
     throw new Error('Framebuffer initializing');
   }
 

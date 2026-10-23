@@ -286,26 +286,7 @@ export const DeviceScreen: React.FC<DeviceScreenProps> = ({ vm, onSendInput, onS
           </div>
         ) : null}
 
-        {/* Booting Overlay State */}
-        {vm.status === 'booting' && !frameSrc && (
-          <div className="absolute inset-0 bg-black/90 flex flex-col items-center justify-center p-6 text-center z-10">
-            <div className="relative mb-4">
-              <Loader2 className="w-12 h-12 text-[#2f8bff] animate-spin" />
-              <div className="absolute inset-0 flex items-center justify-center">
-                <span className="text-[10px] font-bold text-white">VM</span>
-              </div>
-            </div>
-            <h4 className="text-base font-semibold text-white mb-1">Android OS Initializing</h4>
-            <p className="text-xs text-slate-400 max-w-sm mb-3">
-              Starting QEMU process, initializing Linux kernel, zygote, and SurfaceFlinger graphics pipeline...
-            </p>
-            <div className="flex items-center gap-2 text-[11px] font-mono text-slate-400 bg-[#0d1424] px-3 py-1.5 rounded-full border border-[#1b263b]">
-              <span>Uptime: {vm.uptimeSeconds}s</span>
-              <span>•</span>
-              <span>PID: {vm.pid || 'starting'}</span>
-            </div>
-          </div>
-        )}
+
 
         {/* Stopped State Overlay */}
         {vm.status === 'stopped' && (
