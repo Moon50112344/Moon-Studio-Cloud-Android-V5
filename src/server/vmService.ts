@@ -143,28 +143,45 @@ class VMService {
     let bootCompleted = false;
     let adbConnected = false;
 
-    // Check PID file
-    const pidPath = path.join(vmDir, 'qemu.pid');
-    if (fs.existsSync(pidPath)) {
-      const pidVal = parseInt(fs.readFileSync(pidPath, 'utf8').trim(), 10);
-      if (!isNaN(pidVal) && pidVal > 0) {
-        try {
-          process.kill(pidVal, 0); // Check if process is alive
-          const cmdlinePath = `/proc/${pidVal}/cmdline`;
-          if (fs.existsSync(cmdlinePath)) {
-            const cmdline = fs.readFileSync(cmdlinePath, 'utf8');
-            if (cmdline.includes('qemu-system') && cmdline.includes(id)) {
-              pid = pidVal;
-              isRunning = true;
-            }
-          } else {
-            pid = pidVal;
-            isRunning = true;
-          }
-        } catch {
-          // Process is dead
-        }
+    // 1. Detect if QEMU process is actually running using pgrep
+    try {
+      const { stdout: pgrepOut } = await execAsync(`pgrep -f "qemu-system.*-name ${id}\\b" 2>/dev/null`);
+      const matched = pgrepOut.trim().split('\n').map(p => parseInt(p.trim(), 10)).filter(p => !isNaN(p) && p > 0);
+      if (matched.length > 0) {
+        pid = matched[0];
+        isRunning = true;
       }
+    } catch {
+      // Not found in process tree
+    }
+
+    // 2. Check PID file as secondary check
+    const pidPath = path.join(vmDir, 'qemu.pid');
+    if (!isRunning && fs.existsSync(pidPath)) {
+      try {
+        const pidVal = parseInt(fs.readFileSync(pidPath, 'utf8').trim(), 10);
+        if (!isNaN(pidVal) && pidVal > 0) {
+          process.kill(pidVal, 0);
+          pid = pidVal;
+          isRunning = true;
+        }
+      } catch {
+        // PID is dead, remove stale pidfile
+        try {
+          fs.unlinkSync(pidPath);
+        } catch {}
+      }
+    }
+
+    // Keep pidfile synchronized if process is running
+    if (isRunning && pid !== null) {
+      try {
+        fs.writeFileSync(pidPath, String(pid));
+      } catch {}
+    } else if (fs.existsSync(pidPath)) {
+      try {
+        fs.unlinkSync(pidPath);
+      } catch {}
     }
 
     // If running, query real /proc stats
@@ -308,8 +325,9 @@ class VMService {
       return status;
     }
 
-    // Clean up old sockets or port bindings
+    // Clean up any stale or zombie processes with this VM ID and release sockets
     try {
+      await execAsync(`pkill -9 -f "qemu-system.*-name ${id}\\b" 2>/dev/null || true`);
       await execAsync(`fuser -k ${config.qmpPort}/tcp ${config.adbPort}/tcp ${config.vncPort}/tcp 2>/dev/null || true`);
     } catch {
       // ignore
@@ -317,6 +335,15 @@ class VMService {
 
     const serialLog = path.join(vmDir, 'serial.log');
     const pidFile = path.join(vmDir, 'qemu.pid');
+
+    // Remove any stale pidfile so QEMU can lock it without conflict
+    if (fs.existsSync(pidFile)) {
+      try {
+        fs.unlinkSync(pidFile);
+      } catch {}
+    }
+
+    await new Promise((r) => setTimeout(r, 200));
 
     const kernel = fs.existsSync(ANDROID_KERNEL) ? ANDROID_KERNEL : path.join(process.cwd(), 'android', 'x86', 'kernel-ranchu');
     const ramdisk = fs.existsSync(ANDROID_RAMDISK) ? ANDROID_RAMDISK : path.join(process.cwd(), 'android', 'x86', 'ramdisk_adb.img');
@@ -373,6 +400,13 @@ class VMService {
       }
     }
 
+    try {
+      await execAsync(`pkill -9 -f "qemu-system.*-name ${id}\\b" 2>/dev/null || true`);
+      await execAsync(`fuser -k ${status.qmpPort}/tcp ${status.adbPort}/tcp ${status.vncPort}/tcp 2>/dev/null || true`);
+    } catch {
+      // ignore
+    }
+
     const pidPath = path.join(VM_BASE_DIR, id, 'qemu.pid');
     if (fs.existsSync(pidPath)) {
       try {
@@ -380,12 +414,6 @@ class VMService {
       } catch {
         // ignore
       }
-    }
-
-    try {
-      await execAsync(`fuser -k ${status.qmpPort}/tcp ${status.adbPort}/tcp ${status.vncPort}/tcp 2>/dev/null || true`);
-    } catch {
-      // ignore
     }
 
     return this.getVMStatus(id);
