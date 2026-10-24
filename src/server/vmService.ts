@@ -38,8 +38,8 @@ export interface AndroidVMInfo {
 
 function resolveVmBaseDir(): string {
   const candidates = [
-    path.join(process.cwd(), '.vms'),
-    path.join(os.tmpdir(), 'moon-vms'),
+    '/var/lib/moon-vms/instances',
+    path.join(os.tmpdir(), 'moon-vms', 'instances'),
   ];
   for (const dir of candidates) {
     try {
@@ -52,14 +52,12 @@ function resolveVmBaseDir(): string {
       continue;
     }
   }
-  const fallback = path.join(os.tmpdir(), 'moon-vms');
+  const fallback = path.join(os.tmpdir(), 'moon-vms-instances');
   try {
     if (!fs.existsSync(fallback)) {
       fs.mkdirSync(fallback, { recursive: true });
     }
-  } catch {
-    // ignore
-  }
+  } catch {}
   return fallback;
 }
 
@@ -76,15 +74,27 @@ const QEMU_BIN = findBinary('qemu-system-x86_64', '/usr/bin/qemu-system-x86_64')
 const ADB_BIN = findBinary('adb', '/usr/bin/adb');
 
 function getAndroidAsset(relPath: string): string {
+  // Check isolated disk storage outside workspace first
+  const varLibPath = path.join('/var/lib/moon-vms/images', path.basename(relPath));
+  if (fs.existsSync(varLibPath)) return varLibPath;
+
   const localPath = path.join(process.cwd(), 'android', relPath);
   if (fs.existsSync(localPath)) return localPath;
+
   const sysPath = path.join('/android-system', relPath);
   if (fs.existsSync(sysPath)) return sysPath;
-  return localPath;
+
+  return varLibPath;
 }
 
-const ANDROID_KERNEL = getAndroidAsset('x86/kernel-ranchu');
-const ANDROID_RAMDISK = getAndroidAsset('x86/ramdisk_adb.img');
+const ANDROID_KERNEL = fs.existsSync(path.join(process.cwd(), 'android', 'x86', 'kernel-qemu'))
+  ? path.join(process.cwd(), 'android', 'x86', 'kernel-qemu')
+  : getAndroidAsset('x86/kernel-ranchu');
+
+const ANDROID_RAMDISK = fs.existsSync(path.join(process.cwd(), 'android', 'x86', 'ramdisk_qemu_virtio.img'))
+  ? path.join(process.cwd(), 'android', 'x86', 'ramdisk_qemu_virtio.img')
+  : getAndroidAsset('x86/ramdisk_adb.img');
+
 const ANDROID_SYSTEM = getAndroidAsset('x86/system.img');
 
 class VMService {
@@ -348,6 +358,19 @@ class VMService {
     const kernel = fs.existsSync(ANDROID_KERNEL) ? ANDROID_KERNEL : path.join(process.cwd(), 'android', 'x86', 'kernel-ranchu');
     const ramdisk = fs.existsSync(ANDROID_RAMDISK) ? ANDROID_RAMDISK : path.join(process.cwd(), 'android', 'x86', 'ramdisk_adb.img');
     const systemImg = fs.existsSync(ANDROID_SYSTEM) ? ANDROID_SYSTEM : path.join(process.cwd(), 'android', 'x86', 'system.img');
+    const cacheImg = path.join(vmDir, 'cache.img');
+    const dataImg = path.join(vmDir, 'data.img');
+
+    if (!fs.existsSync(cacheImg)) {
+      try {
+        await execAsync(`mkfs.ext4 -F -L cache "${cacheImg}" 64M`);
+      } catch {}
+    }
+    if (!fs.existsSync(dataImg)) {
+      try {
+        await execAsync(`mkfs.ext4 -F -L data "${dataImg}" 256M`);
+      } catch {}
+    }
 
     const cmd = [
       QEMU_BIN,
@@ -357,14 +380,15 @@ class VMService {
       '-kernel', kernel,
       '-initrd', ramdisk,
       '-drive', `file=${systemImg},format=raw,index=0,if=virtio,read-only=on`,
-      '-drive', `file=${path.join(vmDir, 'cache.img')},format=raw,index=1,if=virtio`,
+      '-drive', `file=${cacheImg},format=raw,index=1,if=virtio`,
+      '-drive', `file=${dataImg},format=raw,index=2,if=virtio`,
       '-netdev', `user,id=net0,hostfwd=tcp:127.0.0.1:${config.adbPort}-:5555`,
       '-device', 'virtio-net-pci,netdev=net0',
       '-vga', 'std',
       '-display', 'none',
       '-vnc', `127.0.0.1:${config.vncDisplay}`,
       '-qmp', `tcp:127.0.0.1:${config.qmpPort},server,nowait`,
-      '-append', '"console=ttyS0 androidboot.hardware=ranchu androidboot.selinux=permissive enforcing=0 qemu=1 android.bootanim=0 earlyprintk=serial,ttyS0,115200"',
+      '-append', '"console=tty0 androidboot.hardware=goldfish androidboot.selinux=permissive qemu=1"',
       '-serial', `file:${serialLog}`,
       '-daemonize',
       '-pidfile', pidFile,

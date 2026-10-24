@@ -232,6 +232,22 @@ async function startServer() {
     });
   }
 
+  // Ensure system disk is placed in isolated directory outside web editor workspace
+  const targetDir = '/var/lib/moon-vms/images';
+  const systemImgPath = path.join(targetDir, 'system.img');
+  try {
+    if (!fs.existsSync(targetDir)) {
+      fs.mkdirSync(targetDir, { recursive: true });
+    }
+    const localSystem = path.join(process.cwd(), 'android', 'x86', 'system.img');
+    if (!fs.existsSync(systemImgPath) && fs.existsSync(localSystem)) {
+      console.log('Relocating system.img to isolated VM disk storage...');
+      fs.renameSync(localSystem, systemImgPath);
+    }
+  } catch (err: any) {
+    console.warn('Environment preparation notice:', err.message);
+  }
+
   // Automatically start MoonVM-1 if none is running so user immediately has a live instance
   setTimeout(async () => {
     try {

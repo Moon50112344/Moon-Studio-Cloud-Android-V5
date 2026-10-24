@@ -6,3 +6,10 @@ coverage/
 *.log
 .env*
 !.env.example
+*.img
+*.pid
+*.ppm
+.vms/
+.uploads/
+*.sfs
+
