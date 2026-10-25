@@ -224,7 +224,7 @@ export const DeviceScreen: React.FC<DeviceScreenProps> = ({ vm, onSendInput, onS
           ) : vm.status === 'booting' ? (
             <span className="inline-flex items-center gap-1.5 text-amber-400 font-medium">
               <Loader2 className="w-3 h-3 animate-spin" />
-              BOOTING OS
+              {vm.statusMessage || 'BOOTING OS'}
             </span>
           ) : (
             <span className="inline-flex items-center gap-1.5 text-slate-400 font-medium">

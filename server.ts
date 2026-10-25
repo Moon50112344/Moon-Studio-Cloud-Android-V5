@@ -10,6 +10,7 @@ import fs from 'fs';
 import { fileURLToPath } from 'url';
 import { createServer as createViteServer } from 'vite';
 import { vmService } from './src/server/vmService';
+import { assetManager } from './src/server/assetManager';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -218,6 +219,11 @@ async function startServer() {
     }
   });
 
+  // Provisioning & asset preparation status endpoint
+  app.get('/api/provisioning-status', (_req, res) => {
+    res.json(assetManager.getProvisioningStatus());
+  });
+
   // --- Vite Dev Server Middleware Integration ---
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
@@ -232,21 +238,20 @@ async function startServer() {
     });
   }
 
-  // Ensure system disk is placed in isolated directory outside web editor workspace
-  const targetDir = '/var/lib/moon-vms/images';
-  const systemImgPath = path.join(targetDir, 'system.img');
-  try {
-    if (!fs.existsSync(targetDir)) {
-      fs.mkdirSync(targetDir, { recursive: true });
+  // Ensure Android OS assets are prepared in safe, writable storage (works on Render, Docker, etc.)
+  assetManager.ensureAndroidAssetsReady().then(async () => {
+    try {
+      const vms = await vmService.listVMs();
+      if (vms.length === 0) {
+        console.log('Bootstrapping default Moon Android VM-1...');
+        await vmService.createVM('Moon Pixel Pro (Default)', 2048, 2);
+      }
+    } catch (e: any) {
+      console.warn('Initial VM auto-start info:', e.message);
     }
-    const localSystem = path.join(process.cwd(), 'android', 'x86', 'system.img');
-    if (!fs.existsSync(systemImgPath) && fs.existsSync(localSystem)) {
-      console.log('Relocating system.img to isolated VM disk storage...');
-      fs.renameSync(localSystem, systemImgPath);
-    }
-  } catch (err: any) {
-    console.warn('Environment preparation notice:', err.message);
-  }
+  }).catch((err) => {
+    console.warn('Asset preparation in background notice:', err.message);
+  });
 
   // Automatically start MoonVM-1 if none is running so user immediately has a live instance
   setTimeout(async () => {

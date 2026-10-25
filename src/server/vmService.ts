@@ -36,32 +36,9 @@ export interface AndroidVMInfo {
   statusMessage?: string;
 }
 
-function resolveVmBaseDir(): string {
-  const candidates = [
-    '/var/lib/moon-vms/instances',
-    path.join(os.tmpdir(), 'moon-vms', 'instances'),
-  ];
-  for (const dir of candidates) {
-    try {
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
-      }
-      fs.accessSync(dir, fs.constants.W_OK);
-      return dir;
-    } catch {
-      continue;
-    }
-  }
-  const fallback = path.join(os.tmpdir(), 'moon-vms-instances');
-  try {
-    if (!fs.existsSync(fallback)) {
-      fs.mkdirSync(fallback, { recursive: true });
-    }
-  } catch {}
-  return fallback;
-}
+import { assetManager } from './assetManager';
 
-const VM_BASE_DIR = resolveVmBaseDir();
+const VM_BASE_DIR = assetManager.getInstancesDir();
 
 function findBinary(name: string, defaultPath: string): string {
   if (fs.existsSync(defaultPath)) return defaultPath;
@@ -72,30 +49,6 @@ function findBinary(name: string, defaultPath: string): string {
 
 const QEMU_BIN = findBinary('qemu-system-x86_64', '/usr/bin/qemu-system-x86_64');
 const ADB_BIN = findBinary('adb', '/usr/bin/adb');
-
-function getAndroidAsset(relPath: string): string {
-  // Check isolated disk storage outside workspace first
-  const varLibPath = path.join('/var/lib/moon-vms/images', path.basename(relPath));
-  if (fs.existsSync(varLibPath)) return varLibPath;
-
-  const localPath = path.join(process.cwd(), 'android', relPath);
-  if (fs.existsSync(localPath)) return localPath;
-
-  const sysPath = path.join('/android-system', relPath);
-  if (fs.existsSync(sysPath)) return sysPath;
-
-  return varLibPath;
-}
-
-const ANDROID_KERNEL = fs.existsSync(path.join(process.cwd(), 'android', 'x86', 'kernel-qemu'))
-  ? path.join(process.cwd(), 'android', 'x86', 'kernel-qemu')
-  : getAndroidAsset('x86/kernel-ranchu');
-
-const ANDROID_RAMDISK = fs.existsSync(path.join(process.cwd(), 'android', 'x86', 'ramdisk_qemu_virtio.img'))
-  ? path.join(process.cwd(), 'android', 'x86', 'ramdisk_qemu_virtio.img')
-  : getAndroidAsset('x86/ramdisk_adb.img');
-
-const ANDROID_SYSTEM = getAndroidAsset('x86/system.img');
 
 class VMService {
   private lastFrames: Map<string, Buffer> = new Map();
@@ -238,8 +191,14 @@ class VMService {
     }
 
     let status: 'running' | 'booting' | 'stopped' | 'error' = 'stopped';
+    let statusMessage: string | undefined = undefined;
+
     if (isRunning) {
       status = bootCompleted || uptimeSeconds > 15 ? 'running' : 'booting';
+      statusMessage = isRunning ? (bootCompleted ? 'Android OS active' : 'QEMU kernel initialising...') : undefined;
+    } else if (assetManager.getProvisioningStatus().isDownloading) {
+      status = 'booting';
+      statusMessage = assetManager.getProvisioningStatus().message;
     }
 
     return {
@@ -262,6 +221,7 @@ class VMService {
       diskUsedMb,
       bootCompleted,
       adbConnected,
+      statusMessage,
     };
   }
 
@@ -291,14 +251,20 @@ class VMService {
 
     const ports = allocatePorts(slotIndex);
 
-    // Create real raw disk image for VM cache & runtime
+    // Create real raw disk image for VM cache & data
     const cachePath = path.join(vmDir, 'cache.img');
+    const dataPath = path.join(vmDir, 'data.img');
     if (!fs.existsSync(cachePath)) {
       try {
-        await execAsync(`truncate -s 256M "${cachePath}" 2>/dev/null || true`);
-      } catch {
-        // ignore
-      }
+        await execAsync(`truncate -s 64M "${cachePath}"`);
+        await execAsync(`/usr/sbin/mkfs.ext4 -F -L cache "${cachePath}" 2>/dev/null || mkfs.ext4 -F -L cache "${cachePath}" 2>/dev/null || true`);
+      } catch {}
+    }
+    if (!fs.existsSync(dataPath)) {
+      try {
+        await execAsync(`truncate -s 256M "${dataPath}"`);
+        await execAsync(`/usr/sbin/mkfs.ext4 -F -L data "${dataPath}" 2>/dev/null || mkfs.ext4 -F -L data "${dataPath}" 2>/dev/null || true`);
+      } catch {}
     }
 
     const config = {
@@ -355,20 +321,50 @@ class VMService {
 
     await new Promise((r) => setTimeout(r, 200));
 
-    const kernel = fs.existsSync(ANDROID_KERNEL) ? ANDROID_KERNEL : path.join(process.cwd(), 'android', 'x86', 'kernel-ranchu');
-    const ramdisk = fs.existsSync(ANDROID_RAMDISK) ? ANDROID_RAMDISK : path.join(process.cwd(), 'android', 'x86', 'ramdisk_adb.img');
-    const systemImg = fs.existsSync(ANDROID_SYSTEM) ? ANDROID_SYSTEM : path.join(process.cwd(), 'android', 'x86', 'system.img');
+    // Ensure Android OS assets are ready
+    if (!assetManager.checkAssetsReady()) {
+      assetManager.ensureAndroidAssetsReady().then(() => {
+        this.startVM(id).catch(() => {});
+      }).catch(() => {});
+
+      return {
+        id: config.id,
+        name: config.name,
+        status: 'booting',
+        pid: null,
+        slotIndex: config.slotIndex,
+        adbPort: config.adbPort,
+        qmpPort: config.qmpPort,
+        vncPort: config.vncPort,
+        vncDisplay: config.vncDisplay,
+        ramMb: config.ramMb,
+        cpuCores: config.cpuCores,
+        osVersion: 'Android 5.0.2 Lollipop x86 (AOSP)',
+        createdAt: config.createdAt,
+        uptimeSeconds: 0,
+        cpuPercent: 0,
+        ramUsedMb: 0,
+        diskUsedMb: 256,
+        bootCompleted: false,
+        adbConnected: false,
+        statusMessage: assetManager.getProvisioningStatus().message,
+      };
+    }
+
+    const { kernel, ramdisk, systemImg } = assetManager.getAssets();
     const cacheImg = path.join(vmDir, 'cache.img');
     const dataImg = path.join(vmDir, 'data.img');
 
     if (!fs.existsSync(cacheImg)) {
       try {
-        await execAsync(`mkfs.ext4 -F -L cache "${cacheImg}" 64M`);
+        await execAsync(`truncate -s 64M "${cacheImg}"`);
+        await execAsync(`/usr/sbin/mkfs.ext4 -F -L cache "${cacheImg}" 2>/dev/null || mkfs.ext4 -F -L cache "${cacheImg}" 2>/dev/null || true`);
       } catch {}
     }
     if (!fs.existsSync(dataImg)) {
       try {
-        await execAsync(`mkfs.ext4 -F -L data "${dataImg}" 256M`);
+        await execAsync(`truncate -s 256M "${dataImg}"`);
+        await execAsync(`/usr/sbin/mkfs.ext4 -F -L data "${dataImg}" 2>/dev/null || mkfs.ext4 -F -L data "${dataImg}" 2>/dev/null || true`);
       } catch {}
     }
 
@@ -558,12 +554,16 @@ class VMService {
       return this.lastFrames.get(id)!;
     }
 
-    const seedPath = path.join(process.cwd(), 'seabios_proof.jpg');
-    if (fs.existsSync(seedPath)) {
-      const seedBuffer = fs.readFileSync(seedPath);
-      this.lastFrames.set(id, seedBuffer);
-      return seedBuffer;
-    }
+    try {
+      const initJpg = path.join(os.tmpdir(), `init_fb_${id}.jpg`);
+      if (!fs.existsSync(initJpg)) {
+        await execAsync(`convert -size 1024x768 xc:black "${initJpg}"`);
+      }
+      if (fs.existsSync(initJpg)) {
+        const initBuf = fs.readFileSync(initJpg);
+        return initBuf;
+      }
+    } catch {}
 
     throw new Error('Framebuffer initializing');
   }
