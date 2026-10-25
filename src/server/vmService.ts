@@ -351,44 +351,76 @@ class VMService {
       };
     }
 
-    const { kernel, ramdisk, systemImg } = assetManager.getAssets();
+    const assets = assetManager.getAssets();
     const cacheImg = path.join(vmDir, 'cache.img');
     const dataImg = path.join(vmDir, 'data.img');
 
     if (!fs.existsSync(cacheImg)) {
       try {
         await execAsync(`truncate -s 64M "${cacheImg}"`);
-        await execAsync(`/usr/sbin/mkfs.ext4 -F -L cache "${cacheImg}" 2>/dev/null || mkfs.ext4 -F -L cache "${cacheImg}" 2>/dev/null || true`);
+        await execAsync(`/usr/sbin/mkfs.ext4 -O ^metadata_csum,^64bit -F -L cache "${cacheImg}" 2>/dev/null || mkfs.ext4 -F -L cache "${cacheImg}" 2>/dev/null || true`);
       } catch {}
     }
     if (!fs.existsSync(dataImg)) {
       try {
         await execAsync(`truncate -s 256M "${dataImg}"`);
-        await execAsync(`/usr/sbin/mkfs.ext4 -F -L data "${dataImg}" 2>/dev/null || mkfs.ext4 -F -L data "${dataImg}" 2>/dev/null || true`);
+        await execAsync(`/usr/sbin/mkfs.ext4 -O ^metadata_csum,^64bit -F -L data "${dataImg}" 2>/dev/null || mkfs.ext4 -F -L data "${dataImg}" 2>/dev/null || true`);
+        // Pre-authorize host ADB key if available
+        const hostPub = '/root/.android/adbkey.pub';
+        if (fs.existsSync(hostPub)) {
+          await execAsync(`/usr/sbin/debugfs -w -R "mkdir misc" "${dataImg}" 2>/dev/null || true`);
+          await execAsync(`/usr/sbin/debugfs -w -R "mkdir misc/adb" "${dataImg}" 2>/dev/null || true`);
+          await execAsync(`/usr/sbin/debugfs -w -R "write ${hostPub} misc/adb/adb_keys" "${dataImg}" 2>/dev/null || true`);
+        }
       } catch {}
     }
 
-    const cmd = [
-      QEMU_BIN,
-      '-name', id,
-      '-m', String(config.ramMb),
-      '-smp', String(config.cpuCores),
-      '-kernel', kernel,
-      '-initrd', ramdisk,
-      '-drive', `file=${systemImg},format=raw,index=0,if=virtio,read-only=on`,
-      '-drive', `file=${cacheImg},format=raw,index=1,if=virtio`,
-      '-drive', `file=${dataImg},format=raw,index=2,if=virtio`,
-      '-netdev', `user,id=net0,hostfwd=tcp:127.0.0.1:${config.adbPort}-:5555`,
-      '-device', 'virtio-net-pci,netdev=net0',
-      '-vga', 'std',
-      '-display', 'none',
-      '-vnc', `127.0.0.1:${config.vncDisplay}`,
-      '-qmp', `tcp:127.0.0.1:${config.qmpPort},server,nowait`,
-      '-append', '"console=tty0 androidboot.hardware=goldfish androidboot.selinux=permissive qemu=1"',
-      '-serial', `file:${serialLog}`,
-      '-daemonize',
-      '-pidfile', pidFile,
-    ];
+    let cmd: string[];
+    if (assets.mode === 'android-x86' && assets.isoPath) {
+      cmd = [
+        QEMU_BIN,
+        '-name', id,
+        '-m', String(config.ramMb),
+        '-smp', String(config.cpuCores),
+        '-kernel', assets.kernel,
+        '-initrd', assets.ramdisk,
+        '-drive', `file=${assets.isoPath},format=raw,index=0,if=ide,media=cdrom`,
+        '-drive', `file=${cacheImg},format=raw,index=1,if=ide`,
+        '-drive', `file=${dataImg},format=raw,index=2,if=ide`,
+        '-netdev', `user,id=net0,hostfwd=tcp:127.0.0.1:${config.adbPort}-:5555`,
+        '-device', 'e1000,netdev=net0',
+        '-vga', 'std',
+        '-display', 'none',
+        '-vnc', `127.0.0.1:${config.vncDisplay}`,
+        '-qmp', `tcp:127.0.0.1:${config.qmpPort},server,nowait`,
+        '-append', '"root=/dev/ram0 androidboot.hardware=android_x86 quiet vga=788 SRC= DATA=/dev/sdc"',
+        '-serial', `file:${serialLog}`,
+        '-daemonize',
+        '-pidfile', pidFile,
+      ];
+    } else {
+      cmd = [
+        QEMU_BIN,
+        '-name', id,
+        '-m', String(config.ramMb),
+        '-smp', String(config.cpuCores),
+        '-kernel', assets.kernel,
+        '-initrd', assets.ramdisk,
+        '-drive', `file=${assets.systemImg},format=raw,index=0,if=ide,read-only=on`,
+        '-drive', `file=${cacheImg},format=raw,index=1,if=ide`,
+        '-drive', `file=${dataImg},format=raw,index=2,if=ide`,
+        '-netdev', `user,id=net0,hostfwd=tcp:127.0.0.1:${config.adbPort}-:5555`,
+        '-device', 'e1000,netdev=net0',
+        '-vga', 'std',
+        '-display', 'none',
+        '-vnc', `127.0.0.1:${config.vncDisplay}`,
+        '-qmp', `tcp:127.0.0.1:${config.qmpPort},server,nowait`,
+        '-append', '"console=tty0 androidboot.hardware=goldfish androidboot.selinux=permissive qemu=1"',
+        '-serial', `file:${serialLog}`,
+        '-daemonize',
+        '-pidfile', pidFile,
+      ];
+    }
 
     await execAsync(cmd.join(' '));
 

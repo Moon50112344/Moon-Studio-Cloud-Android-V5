@@ -98,18 +98,19 @@ export class AssetManager {
    */
   public checkAssetsReady(): boolean {
     const imagesDir = this.getImagesDir();
+    // Mode 1: Android-x86 (Hardware VESA GUI / Launcher)
+    const ax86Iso = path.join(imagesDir, 'android_x86.iso');
+    const ax86Kernel = path.join(imagesDir, 'kernel');
+    const ax86Initrd = path.join(imagesDir, 'initrd.img');
+    const hasAx86 = fs.existsSync(ax86Iso) && fs.existsSync(ax86Kernel) && fs.existsSync(ax86Initrd);
+
+    // Mode 2: AOSP Goldfish
     const systemImg = path.join(imagesDir, 'system.img');
     const kernel = path.join(imagesDir, 'kernel-qemu');
-    const ramdisk = path.join(imagesDir, 'ramdisk_virtio.img');
+    const ramdisk = path.join(imagesDir, 'ramdisk_sda.img');
+    const hasAosp = fs.existsSync(systemImg) && fs.existsSync(kernel) && fs.existsSync(ramdisk);
 
-    // Also check local project android/ directory as fallback
-    const localKernel = path.join(process.cwd(), 'android', 'x86', 'kernel-qemu');
-
-    const hasSystem = fs.existsSync(systemImg);
-    const hasKernel = fs.existsSync(kernel) || fs.existsSync(localKernel);
-    const hasRamdisk = fs.existsSync(ramdisk) || fs.existsSync(path.join(imagesDir, 'ramdisk.img'));
-
-    const ready = hasSystem && hasKernel && hasRamdisk;
+    const ready = hasAx86 || hasAosp;
     this.provisioningStatus.isReady = ready;
     if (ready) {
       this.provisioningStatus.message = 'Android OS assets are ready.';
@@ -118,23 +119,34 @@ export class AssetManager {
     return ready;
   }
 
-  public getAssets(): { kernel: string; ramdisk: string; systemImg: string } {
+  public getAssets(): {
+    mode: 'android-x86' | 'aosp';
+    kernel: string;
+    ramdisk: string;
+    systemImg: string;
+    isoPath?: string;
+  } {
     const imagesDir = this.getImagesDir();
-    const systemImg = path.join(imagesDir, 'system.img');
-    
-    let kernel = path.join(imagesDir, 'kernel-qemu');
-    if (!fs.existsSync(kernel)) {
-      const localKernel = path.join(process.cwd(), 'android', 'x86', 'kernel-qemu');
-      if (fs.existsSync(localKernel)) kernel = localKernel;
+    const ax86Iso = path.join(imagesDir, 'android_x86.iso');
+    const ax86Kernel = path.join(imagesDir, 'kernel');
+    const ax86Initrd = path.join(imagesDir, 'initrd.img');
+
+    if (fs.existsSync(ax86Iso) && fs.existsSync(ax86Kernel) && fs.existsSync(ax86Initrd)) {
+      return {
+        mode: 'android-x86',
+        kernel: ax86Kernel,
+        ramdisk: ax86Initrd,
+        systemImg: path.join(imagesDir, 'system.sfs'),
+        isoPath: ax86Iso,
+      };
     }
 
-    let ramdisk = path.join(imagesDir, 'ramdisk_virtio.img');
-    if (!fs.existsSync(ramdisk)) {
-      const rawRamdisk = path.join(imagesDir, 'ramdisk.img');
-      if (fs.existsSync(rawRamdisk)) ramdisk = rawRamdisk;
-    }
-
-    return { kernel, ramdisk, systemImg };
+    return {
+      mode: 'aosp',
+      kernel: path.join(imagesDir, 'kernel-qemu'),
+      ramdisk: path.join(imagesDir, 'ramdisk_sda.img'),
+      systemImg: path.join(imagesDir, 'system.img'),
+    };
   }
 
   /**
