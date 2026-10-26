@@ -130,8 +130,7 @@ async function startServer() {
   app.get('/api/vms/:id/screen', async (req, res) => {
     try {
       const buffer = await vmService.captureScreen(req.params.id);
-      const isSvg = buffer.toString('utf8', 0, 10).includes('<svg');
-      res.setHeader('Content-Type', isSvg ? 'image/svg+xml' : 'image/jpeg');
+      res.setHeader('Content-Type', 'image/jpeg');
       res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
       res.setHeader('Pragma', 'no-cache');
       res.setHeader('Expires', '0');

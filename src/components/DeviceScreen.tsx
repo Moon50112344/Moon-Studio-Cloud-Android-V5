@@ -284,6 +284,14 @@ export const DeviceScreen: React.FC<DeviceScreenProps> = ({ vm, onSendInput, onS
               />
             )}
           </div>
+        ) : !frameSrc && vm.status !== 'stopped' ? (
+          <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center z-10 bg-[#070b14]">
+            <Loader2 className="w-9 h-9 text-[#2f8bff] animate-spin mb-3" />
+            <h4 className="text-sm font-semibold text-slate-200">Initializing Hardware Display</h4>
+            <p className="text-xs text-slate-400 mt-1 max-w-xs">
+              {vm.statusMessage || 'Capturing live QEMU VESA framebuffer...'}
+            </p>
+          </div>
         ) : null}
 
 

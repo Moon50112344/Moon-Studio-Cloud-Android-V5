@@ -106,34 +106,43 @@ class VMService {
     let bootCompleted = false;
     let adbConnected = false;
 
-    // 1. Detect if QEMU process is actually running using pgrep
-    try {
-      const { stdout: pgrepOut } = await execAsync(`pgrep -f "qemu-system.*-name ${id}\\b" 2>/dev/null`);
-      const matched = pgrepOut.trim().split('\n').map(p => parseInt(p.trim(), 10)).filter(p => !isNaN(p) && p > 0);
-      if (matched.length > 0) {
-        pid = matched[0];
-        isRunning = true;
-      }
-    } catch {
-      // Not found in process tree
-    }
-
-    // 2. Check PID file as secondary check
+    // 1. Check PID file first
     const pidPath = path.join(vmDir, 'qemu.pid');
-    if (!isRunning && fs.existsSync(pidPath)) {
+    if (fs.existsSync(pidPath)) {
       try {
         const pidVal = parseInt(fs.readFileSync(pidPath, 'utf8').trim(), 10);
         if (!isNaN(pidVal) && pidVal > 0) {
           process.kill(pidVal, 0);
-          pid = pidVal;
-          isRunning = true;
+          const cmdlinePath = `/proc/${pidVal}/cmdline`;
+          if (fs.existsSync(cmdlinePath)) {
+            const cmdline = fs.readFileSync(cmdlinePath, 'utf8');
+            if (cmdline.includes('qemu') && cmdline.includes(id)) {
+              pid = pidVal;
+              isRunning = true;
+            }
+          }
         }
       } catch {
-        // PID is dead, remove stale pidfile
-        try {
-          fs.unlinkSync(pidPath);
-        } catch {}
+        try { fs.unlinkSync(pidPath); } catch {}
       }
+    }
+
+    // 2. Secondary scan with [q]emu pattern avoiding self-match
+    if (!isRunning) {
+      try {
+        const { stdout: pgrepOut } = await execAsync(`pgrep -f "\\[q\\]emu-system.*-name ${id}\\b" 2>/dev/null`);
+        const matched = pgrepOut.trim().split('\n').map(p => parseInt(p.trim(), 10)).filter(p => !isNaN(p) && p > 0);
+        for (const p of matched) {
+          try {
+            const cmdline = fs.readFileSync(`/proc/${p}/cmdline`, 'utf8');
+            if (cmdline.includes('qemu') && cmdline.includes(id)) {
+              pid = p;
+              isRunning = true;
+              break;
+            }
+          } catch {}
+        }
+      } catch {}
     }
 
     // Keep pidfile synchronized if process is running
@@ -226,6 +235,48 @@ class VMService {
   }
 
   /**
+   * Helper to ensure raw disk images are properly partitioned with kernel-compatible ext4.
+   */
+  private async ensureVMDisks(vmDir: string): Promise<{ cacheImg: string; dataImg: string }> {
+    const cacheImg = path.join(vmDir, 'cache.img');
+    const dataImg = path.join(vmDir, 'data.img');
+
+    if (!fs.existsSync(cacheImg)) {
+      try {
+        await execAsync(`truncate -s 64M "${cacheImg}"`);
+        await execAsync(`/usr/sbin/mkfs.ext4 -O ^metadata_csum,^64bit -F -L cache "${cacheImg}" 2>/dev/null || mkfs.ext4 -O ^metadata_csum,^64bit -F -L cache "${cacheImg}" 2>/dev/null || true`);
+      } catch {}
+    }
+
+    if (!fs.existsSync(dataImg)) {
+      try {
+        await execAsync(`truncate -s 256M "${dataImg}"`);
+        await execAsync(`/usr/sbin/mkfs.ext4 -O ^metadata_csum,^64bit -F -L data "${dataImg}" 2>/dev/null || mkfs.ext4 -O ^metadata_csum,^64bit -F -L data "${dataImg}" 2>/dev/null || true`);
+
+        // Write local.prop to enable adbd on TCP 5555 without authentication prompts
+        const tmpProp = path.join(os.tmpdir(), `local_${Date.now()}.prop`);
+        fs.writeFileSync(tmpProp, 'service.adb.tcp.port=5555\npersist.adb.tcp.port=5555\npersist.sys.usb.config=adb\nro.adb.secure=0\nro.secure=0\n');
+        await execAsync(`/usr/sbin/debugfs -w -R "write ${tmpProp} local.prop" "${dataImg}" 2>/dev/null || true`);
+        if (fs.existsSync(tmpProp)) fs.unlinkSync(tmpProp);
+
+        // Pre-authorize host ADB key if available
+        const adbKeyCandidates = [
+          path.join(os.homedir(), '.android', 'adbkey.pub'),
+          '/root/.android/adbkey.pub',
+        ];
+        const hostPub = adbKeyCandidates.find(p => fs.existsSync(p));
+        if (hostPub) {
+          await execAsync(`/usr/sbin/debugfs -w -R "mkdir misc" "${dataImg}" 2>/dev/null || true`);
+          await execAsync(`/usr/sbin/debugfs -w -R "mkdir misc/adb" "${dataImg}" 2>/dev/null || true`);
+          await execAsync(`/usr/sbin/debugfs -w -R "write ${hostPub} misc/adb/adb_keys" "${dataImg}" 2>/dev/null || true`);
+        }
+      } catch {}
+    }
+
+    return { cacheImg, dataImg };
+  }
+
+  /**
    * Creates a genuine Android VM with dedicated storage disk and configuration.
    */
   async createVM(name: string, ramMb: number = 2048, cpuCores: number = 2): Promise<AndroidVMInfo> {
@@ -250,22 +301,7 @@ class VMService {
     }
 
     const ports = allocatePorts(slotIndex);
-
-    // Create real raw disk image for VM cache & data
-    const cachePath = path.join(vmDir, 'cache.img');
-    const dataPath = path.join(vmDir, 'data.img');
-    if (!fs.existsSync(cachePath)) {
-      try {
-        await execAsync(`truncate -s 64M "${cachePath}"`);
-        await execAsync(`/usr/sbin/mkfs.ext4 -F -L cache "${cachePath}" 2>/dev/null || mkfs.ext4 -F -L cache "${cachePath}" 2>/dev/null || true`);
-      } catch {}
-    }
-    if (!fs.existsSync(dataPath)) {
-      try {
-        await execAsync(`truncate -s 256M "${dataPath}"`);
-        await execAsync(`/usr/sbin/mkfs.ext4 -F -L data "${dataPath}" 2>/dev/null || mkfs.ext4 -F -L data "${dataPath}" 2>/dev/null || true`);
-      } catch {}
-    }
+    await this.ensureVMDisks(vmDir);
 
     const config = {
       id,
@@ -339,7 +375,7 @@ class VMService {
         vncDisplay: config.vncDisplay,
         ramMb: config.ramMb,
         cpuCores: config.cpuCores,
-        osVersion: 'Android 5.0.2 Lollipop x86 (AOSP)',
+        osVersion: 'Android 4.4 KitKat x86 (Hardware VESA)',
         createdAt: config.createdAt,
         uptimeSeconds: 0,
         cpuPercent: 0,
@@ -352,28 +388,7 @@ class VMService {
     }
 
     const assets = assetManager.getAssets();
-    const cacheImg = path.join(vmDir, 'cache.img');
-    const dataImg = path.join(vmDir, 'data.img');
-
-    if (!fs.existsSync(cacheImg)) {
-      try {
-        await execAsync(`truncate -s 64M "${cacheImg}"`);
-        await execAsync(`/usr/sbin/mkfs.ext4 -O ^metadata_csum,^64bit -F -L cache "${cacheImg}" 2>/dev/null || mkfs.ext4 -F -L cache "${cacheImg}" 2>/dev/null || true`);
-      } catch {}
-    }
-    if (!fs.existsSync(dataImg)) {
-      try {
-        await execAsync(`truncate -s 256M "${dataImg}"`);
-        await execAsync(`/usr/sbin/mkfs.ext4 -O ^metadata_csum,^64bit -F -L data "${dataImg}" 2>/dev/null || mkfs.ext4 -F -L data "${dataImg}" 2>/dev/null || true`);
-        // Pre-authorize host ADB key if available
-        const hostPub = '/root/.android/adbkey.pub';
-        if (fs.existsSync(hostPub)) {
-          await execAsync(`/usr/sbin/debugfs -w -R "mkdir misc" "${dataImg}" 2>/dev/null || true`);
-          await execAsync(`/usr/sbin/debugfs -w -R "mkdir misc/adb" "${dataImg}" 2>/dev/null || true`);
-          await execAsync(`/usr/sbin/debugfs -w -R "write ${hostPub} misc/adb/adb_keys" "${dataImg}" 2>/dev/null || true`);
-        }
-      } catch {}
-    }
+    const { cacheImg, dataImg } = await this.ensureVMDisks(vmDir);
 
     let cmd: string[];
     if (assets.mode === 'android-x86' && assets.isoPath) {
@@ -385,16 +400,14 @@ class VMService {
         '-kernel', assets.kernel,
         '-initrd', assets.ramdisk,
         '-drive', `file=${assets.isoPath},format=raw,index=0,if=ide,media=cdrom`,
-        '-drive', `file=${cacheImg},format=raw,index=1,if=ide`,
-        '-drive', `file=${dataImg},format=raw,index=2,if=ide`,
+        '-drive', `file=${dataImg},format=raw,index=1,if=ide`,
         '-netdev', `user,id=net0,hostfwd=tcp:127.0.0.1:${config.adbPort}-:5555`,
         '-device', 'e1000,netdev=net0',
         '-vga', 'std',
         '-display', 'none',
         '-vnc', `127.0.0.1:${config.vncDisplay}`,
         '-qmp', `tcp:127.0.0.1:${config.qmpPort},server,nowait`,
-        '-append', '"root=/dev/ram0 androidboot.hardware=android_x86 quiet vga=788 SRC= DATA=/dev/sdc"',
-        '-serial', `file:${serialLog}`,
+        '-append', '"root=/dev/ram0 androidboot.hardware=android_x86 quiet vga=788 SRC= DATA=/dev/sdb"',
         '-daemonize',
         '-pidfile', pidFile,
       ];
@@ -573,7 +586,7 @@ class VMService {
         return buffer;
       }
     } catch {
-      // return last frame if available
+      // return last genuine frame if available
       if (this.lastFrames.has(id)) {
         return this.lastFrames.get(id)!;
       }
@@ -585,17 +598,6 @@ class VMService {
     if (this.lastFrames.has(id)) {
       return this.lastFrames.get(id)!;
     }
-
-    try {
-      const initJpg = path.join(os.tmpdir(), `init_fb_${id}.jpg`);
-      if (!fs.existsSync(initJpg)) {
-        await execAsync(`convert -size 1024x768 xc:black "${initJpg}"`);
-      }
-      if (fs.existsSync(initJpg)) {
-        const initBuf = fs.readFileSync(initJpg);
-        return initBuf;
-      }
-    } catch {}
 
     throw new Error('Framebuffer initializing');
   }

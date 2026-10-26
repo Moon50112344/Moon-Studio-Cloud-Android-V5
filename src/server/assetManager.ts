@@ -158,7 +158,6 @@ export class AssetManager {
     }
 
     if (this.provisioningStatus.isDownloading) {
-      // Already downloading, wait until finished
       return new Promise((resolve) => {
         const interval = setInterval(() => {
           if (!this.provisioningStatus.isDownloading) {
@@ -170,61 +169,36 @@ export class AssetManager {
     }
 
     this.provisioningStatus.isDownloading = true;
-    this.provisioningStatus.progress = 5;
-    this.provisioningStatus.message = 'Downloading Android AOSP OS images from Google repository...';
+    this.provisioningStatus.progress = 10;
+    this.provisioningStatus.message = 'Downloading Android OS image (Android-x86 VESA GUI)...';
 
     const imagesDir = this.getImagesDir();
-    const tempZip = path.join(os.tmpdir(), `android_x86_${Date.now()}.zip`);
-    const extractDir = path.join(os.tmpdir(), `android_extract_${Date.now()}`);
+    const isoPath = path.join(imagesDir, 'android_x86.iso');
 
     try {
-      console.log('[AssetManager] Downloading official Android x86 system image archive (198 MB)...');
-      this.provisioningStatus.progress = 15;
-      this.provisioningStatus.message = 'Fetching Android OS archive (198 MB)...';
+      if (!fs.existsSync(isoPath)) {
+        console.log('[AssetManager] Downloading Android-x86 4.4 ISO (441 MB)...');
+        this.provisioningStatus.progress = 25;
+        this.provisioningStatus.message = 'Fetching Android OS ISO (441 MB)...';
 
-      // Download from Google official repository
-      await execAsync(
-        `curl -L -f -s -o "${tempZip}" https://dl.google.com/android/repository/sys-img/android/x86-21_r05.zip`,
-        { timeout: 300000 }
-      );
-
-      this.provisioningStatus.progress = 60;
-      this.provisioningStatus.message = 'Extracting system.img, kernel, and ramdisk...';
-      console.log('[AssetManager] Extracting Android image files...');
-
-      if (!fs.existsSync(extractDir)) {
-        fs.mkdirSync(extractDir, { recursive: true });
+        await execAsync(
+          `curl -L -f -s -o "${isoPath}" "https://downloads.sourceforge.net/project/android-x86/Release%204.4/android-x86-4.4-r5.iso"`,
+          { timeout: 300000 }
+        );
       }
 
-      await execAsync(`unzip -q -o "${tempZip}" "x86/*" -d "${extractDir}"`);
+      this.provisioningStatus.progress = 70;
+      this.provisioningStatus.message = 'Extracting kernel, initrd, and system.sfs...';
+      console.log('[AssetManager] Extracting Android image files from ISO...');
 
-      const extractedX86 = path.join(extractDir, 'x86');
-      const targetSystem = path.join(imagesDir, 'system.img');
-      const targetKernel = path.join(imagesDir, 'kernel-qemu');
-      const targetRamdisk = path.join(imagesDir, 'ramdisk.img');
-
-      if (fs.existsSync(path.join(extractedX86, 'system.img'))) {
-        fs.copyFileSync(path.join(extractedX86, 'system.img'), targetSystem);
-      }
-      if (fs.existsSync(path.join(extractedX86, 'kernel-qemu'))) {
-        fs.copyFileSync(path.join(extractedX86, 'kernel-qemu'), targetKernel);
-      }
-      if (fs.existsSync(path.join(extractedX86, 'ramdisk.img'))) {
-        fs.copyFileSync(path.join(extractedX86, 'ramdisk.img'), targetRamdisk);
-      }
-
-      this.provisioningStatus.progress = 85;
-      this.provisioningStatus.message = 'Building VirtIO-optimized Android ramdisk...';
-      console.log('[AssetManager] Building VirtIO ramdisk...');
-
-      // Build ramdisk_virtio.img
-      await this.buildVirtIORamdisk(targetRamdisk, path.join(imagesDir, 'ramdisk_virtio.img'));
+      // Extract kernel, initrd.img, and system.sfs
+      await execAsync(`7z e "${isoPath}" kernel initrd.img system.sfs -o"${imagesDir}" -y 2>/dev/null || bsdtar -xf "${isoPath}" kernel initrd.img system.sfs -C "${imagesDir}" 2>/dev/null || true`);
 
       this.provisioningStatus.progress = 100;
-      this.provisioningStatus.isReady = true;
+      this.provisioningStatus.isReady = this.checkAssetsReady();
       this.provisioningStatus.message = 'Android OS assets prepared successfully.';
       console.log('[AssetManager] Android OS assets prepared successfully.');
-      return true;
+      return this.provisioningStatus.isReady;
     } catch (err: any) {
       console.error('[AssetManager] Failed to prepare Android assets:', err.message);
       this.provisioningStatus.error = err.message;
@@ -232,10 +206,6 @@ export class AssetManager {
       return false;
     } finally {
       this.provisioningStatus.isDownloading = false;
-      try {
-        if (fs.existsSync(tempZip)) fs.unlinkSync(tempZip);
-        if (fs.existsSync(extractDir)) fs.rmSync(extractDir, { recursive: true, force: true });
-      } catch {}
     }
   }
 
