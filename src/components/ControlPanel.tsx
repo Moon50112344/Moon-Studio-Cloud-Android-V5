@@ -204,6 +204,123 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
         </div>
       </div>
 
+      {/* Multi-Finger Gestures & Touch Controls */}
+      <div>
+        <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2 flex items-center justify-between">
+          <span>Cử chỉ đa ngón (Multi-Touch Gestures)</span>
+          <span className="text-[10px] text-[#2f8bff] font-normal">1, 2 & 3 Ngón</span>
+        </div>
+
+        {/* 1-Finger Actions */}
+        <div className="mb-2">
+          <div className="text-[10px] text-slate-400 font-medium mb-1">👆 1 Ngón (Single Finger)</div>
+          <div className="grid grid-cols-3 gap-1.5">
+            <button
+              onClick={() => onSendInput({ type: 'touch', x: 400, y: 300 } as any)}
+              disabled={!isEnabled}
+              className="py-1.5 px-2 rounded-lg bg-[#10192e] hover:bg-[#16223e] border border-[#213052] text-slate-300 hover:text-white text-[11px] transition-all cursor-pointer disabled:opacity-40"
+              title="Chạm 1 ngón vào giữa màn hình"
+            >
+              Chạm giữa
+            </button>
+            <button
+              onClick={() => onSendInput({ type: 'longpress', x: 400, y: 300, durationMs: 1000 } as any)}
+              disabled={!isEnabled}
+              className="py-1.5 px-2 rounded-lg bg-[#10192e] hover:bg-[#16223e] border border-[#213052] text-slate-300 hover:text-white text-[11px] transition-all cursor-pointer disabled:opacity-40"
+              title="Nhấn giữ 1 giây để mở menu ngữ cảnh"
+            >
+              Nhấn giữ 1s
+            </button>
+            <button
+              onClick={() => onSendInput({ type: 'notification_shade' } as any)}
+              disabled={!isEnabled}
+              className="py-1.5 px-2 rounded-lg bg-[#10192e] hover:bg-[#16223e] border border-[#213052] text-slate-300 hover:text-white text-[11px] transition-all cursor-pointer disabled:opacity-40"
+              title="Kéo thanh thông báo từ trên xuống"
+            >
+              Thanh thông báo
+            </button>
+          </div>
+        </div>
+
+        {/* 2-Finger Actions */}
+        <div className="mb-2">
+          <div className="text-[10px] text-slate-400 font-medium mb-1">✌️ 2 Ngón (Dual Fingers)</div>
+          <div className="grid grid-cols-3 gap-1.5">
+            <button
+              onClick={() => onSendInput({ type: 'pinch_out' } as any)}
+              disabled={!isEnabled}
+              className="py-1.5 px-2 rounded-lg bg-[#10192e] hover:bg-[#16223e] border border-[#213052] text-slate-300 hover:text-cyan-300 text-[11px] transition-all cursor-pointer disabled:opacity-40"
+              title="Phóng to 2 ngón (Zoom In)"
+            >
+              🔍 Phóng to
+            </button>
+            <button
+              onClick={() => onSendInput({ type: 'pinch_in' } as any)}
+              disabled={!isEnabled}
+              className="py-1.5 px-2 rounded-lg bg-[#10192e] hover:bg-[#16223e] border border-[#213052] text-slate-300 hover:text-cyan-300 text-[11px] transition-all cursor-pointer disabled:opacity-40"
+              title="Thu nhỏ 2 ngón (Zoom Out)"
+            >
+              🔎 Thu nhỏ
+            </button>
+            <button
+              onClick={() => onSendInput({ type: 'quick_settings' } as any)}
+              disabled={!isEnabled}
+              className="py-1.5 px-2 rounded-lg bg-[#10192e] hover:bg-[#16223e] border border-[#213052] text-slate-300 hover:text-cyan-300 text-[11px] transition-all cursor-pointer disabled:opacity-40"
+              title="Kéo 2 ngón từ trên xuống mở Cài đặt nhanh"
+            >
+              Cài đặt nhanh
+            </button>
+            <button
+              onClick={() => onSendInput({ type: 'two_finger_scroll', direction: 'down' } as any)}
+              disabled={!isEnabled}
+              className="py-1.5 px-2 rounded-lg bg-[#10192e] hover:bg-[#16223e] border border-[#213052] text-slate-300 hover:text-cyan-300 text-[11px] transition-all cursor-pointer disabled:opacity-40"
+              title="Cuộn trang xuống bằng 2 ngón"
+            >
+              ⬇️ Cuộn xuống
+            </button>
+            <button
+              onClick={() => onSendInput({ type: 'two_finger_scroll', direction: 'up' } as any)}
+              disabled={!isEnabled}
+              className="py-1.5 px-2 rounded-lg bg-[#10192e] hover:bg-[#16223e] border border-[#213052] text-slate-300 hover:text-cyan-300 text-[11px] transition-all cursor-pointer disabled:opacity-40"
+              title="Cuộn trang lên bằng 2 ngón"
+            >
+              ⬆️ Cuộn lên
+            </button>
+            <button
+              onClick={() => onSendInput({ type: 'two_finger_tap', x: 400, y: 300 } as any)}
+              disabled={!isEnabled}
+              className="py-1.5 px-2 rounded-lg bg-[#10192e] hover:bg-[#16223e] border border-[#213052] text-slate-300 hover:text-cyan-300 text-[11px] transition-all cursor-pointer disabled:opacity-40"
+              title="Chạm kép 2 ngón đồng thời"
+            >
+              Chạm kép
+            </button>
+          </div>
+        </div>
+
+        {/* 3-Finger Actions */}
+        <div>
+          <div className="text-[10px] text-slate-400 font-medium mb-1">🖐️ 3 Ngón (Triple Fingers)</div>
+          <div className="grid grid-cols-2 gap-1.5">
+            <button
+              onClick={() => onSendInput({ type: 'three_finger_swipe_down' } as any)}
+              disabled={!isEnabled}
+              className="py-1.5 px-2 rounded-lg bg-[#10192e] hover:bg-[#16223e] border border-[#213052] text-slate-300 hover:text-emerald-300 text-[11px] transition-all cursor-pointer disabled:opacity-40 flex items-center justify-center gap-1"
+              title="Vuốt 3 ngón xuống để chụp ảnh màn hình"
+            >
+              <span>📸 Chụp màn hình (3 ngón)</span>
+            </button>
+            <button
+              onClick={() => onSendInput({ type: 'three_finger_swipe_up' } as any)}
+              disabled={!isEnabled}
+              className="py-1.5 px-2 rounded-lg bg-[#10192e] hover:bg-[#16223e] border border-[#213052] text-slate-300 hover:text-emerald-300 text-[11px] transition-all cursor-pointer disabled:opacity-40 flex items-center justify-center gap-1"
+              title="Vuốt 3 ngón lên để mở màn hình đa nhiệm"
+            >
+              <span>🔄 Đa nhiệm (3 ngón)</span>
+            </button>
+          </div>
+        </div>
+      </div>
+
       {/* Keyboard Input Stream */}
       <div>
         <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2 flex items-center justify-between">

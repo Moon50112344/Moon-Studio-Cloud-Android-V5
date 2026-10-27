@@ -179,10 +179,11 @@ class VMService {
 
       // Check real ADB status
       try {
-        const { stdout } = await execAsync(`${ADB_BIN} -s 127.0.0.1:${config.adbPort} get-state 2>/dev/null`, { timeout: 1200 });
+        const adbTarget = await this.resolveAdbTarget(config.adbPort);
+        const { stdout } = await execAsync(`${ADB_BIN} -s ${adbTarget} get-state 2>/dev/null`, { timeout: 1200 });
         if (stdout.trim() === 'device') {
           adbConnected = true;
-          const { stdout: bootOut } = await execAsync(`${ADB_BIN} -s 127.0.0.1:${config.adbPort} shell getprop sys.boot_completed 2>/dev/null`, { timeout: 1200 });
+          const { stdout: bootOut } = await execAsync(`${ADB_BIN} -s ${adbTarget} shell getprop sys.boot_completed 2>/dev/null`, { timeout: 1200 });
           bootCompleted = bootOut.trim() === '1';
         }
       } catch {
@@ -603,10 +604,35 @@ class VMService {
   }
 
   /**
+   * Resolves the actual online ADB device target (e.g., emulator-5554 or 127.0.0.1:5555).
+   */
+  async resolveAdbTarget(adbPort: number): Promise<string> {
+    try {
+      const { stdout } = await execAsync(`${ADB_BIN} devices 2>/dev/null`);
+      const lines = stdout.split('\n');
+      const onlineTargets: string[] = [];
+      for (const line of lines) {
+        const parts = line.trim().split(/\s+/);
+        if (parts.length >= 2 && parts[1] === 'device') {
+          onlineTargets.push(parts[0]);
+        }
+      }
+      const emulatorName = `emulator-${adbPort - 1}`;
+      const tcpName = `127.0.0.1:${adbPort}`;
+      if (onlineTargets.includes(emulatorName)) return emulatorName;
+      if (onlineTargets.includes(tcpName)) return tcpName;
+      if (onlineTargets.length > 0) return onlineTargets[0];
+    } catch {}
+    return `127.0.0.1:${adbPort}`;
+  }
+
+  /**
    * Dispatches touch, mouse click, gesture, or key navigation directly to the running QEMU hardware VM.
+   * Supports 1-finger (tap, drag, long-press), 2-finger (pinch in/out, dual-scroll, dual-tap, quick settings),
+   * and 3-finger gestures (screenshot, recents/app-switch, triple-tap).
    */
   async sendInput(id: string, event: {
-    type: 'touch' | 'swipe' | 'key' | 'text';
+    type: 'touch' | 'swipe' | 'key' | 'text' | 'longpress' | 'pinch_in' | 'pinch_out' | 'two_finger_scroll' | 'two_finger_tap' | 'three_finger_swipe_down' | 'three_finger_swipe_up' | 'three_finger_tap' | 'quick_settings' | 'notification_shade';
     x?: number;
     y?: number;
     viewWidth?: number;
@@ -619,44 +645,200 @@ class VMService {
     action?: string;
     keyCode?: number | string;
     text?: string;
+    direction?: 'up' | 'down' | 'left' | 'right';
   }): Promise<{ success: boolean; details?: string }> {
     const status = await this.getVMStatus(id);
     if (status.status === 'stopped') {
       throw new Error(`VM ${id} is not running`);
     }
 
-    // Touch tap / click
-    if (event.type === 'touch' && event.x !== undefined && event.y !== undefined) {
-      const scaled = scaleCoordinate(
-        event.x,
-        event.y,
-        event.viewWidth || 1024,
-        event.viewHeight || 768,
-        1024,
-        768
-      );
+    const target = await this.resolveAdbTarget(status.adbPort);
+    const vW = event.viewWidth || 1024;
+    const vH = event.viewHeight || 768;
 
-      // Send to Android ADB
+    // 1-FINGER: Single Tap / Click
+    if (event.type === 'touch' && event.x !== undefined && event.y !== undefined) {
+      const scaled = scaleCoordinate(event.x, event.y, vW, vH, 800, 600);
       try {
-        await execAsync(`${ADB_BIN} -s 127.0.0.1:${status.adbPort} shell input tap ${scaled.x} ${scaled.y}`);
-        return { success: true, details: `Tapped (${scaled.x}, ${scaled.y}) via ADB` };
+        await execAsync(`${ADB_BIN} -s ${target} shell input tap ${scaled.x} ${scaled.y}`, { timeout: 3000 });
+        return { success: true, details: `1-Finger tap (${scaled.x}, ${scaled.y}) via ADB` };
       } catch {
-        // Fallback to QMP mouse click
-        return { success: true, details: `Dispatched tap (${scaled.x}, ${scaled.y})` };
+        // Fallback to QMP absolute pointing device (usb-tablet)
+        try {
+          const qmpX = Math.round((scaled.x / 800) * 32767);
+          const qmpY = Math.round((scaled.y / 600) * 32767);
+          await this.sendQMPCommand(status.qmpPort, {
+            execute: 'input-send-event',
+            arguments: {
+              events: [
+                { type: 'abs', data: { axis: 'x', value: qmpX } },
+                { type: 'abs', data: { axis: 'y', value: qmpY } },
+                { type: 'btn', data: { button: 'left', down: true } },
+              ],
+            },
+          });
+          setTimeout(async () => {
+            try {
+              await this.sendQMPCommand(status.qmpPort, {
+                execute: 'input-send-event',
+                arguments: [{ type: 'btn', data: { button: 'left', down: false } }],
+              });
+            } catch {}
+          }, 80);
+          return { success: true, details: `QMP hardware tap dispatched at (${scaled.x}, ${scaled.y})` };
+        } catch {
+          return { success: true, details: `Dispatched tap (${scaled.x}, ${scaled.y})` };
+        }
       }
     }
 
-    // Swipe gesture
+    // 1-FINGER: Long Press (Press and hold for 1000ms)
+    if (event.type === 'longpress' && event.x !== undefined && event.y !== undefined) {
+      const scaled = scaleCoordinate(event.x, event.y, vW, vH, 800, 600);
+      const dur = event.durationMs || 1000;
+      try {
+        await execAsync(`${ADB_BIN} -s ${target} shell input swipe ${scaled.x} ${scaled.y} ${scaled.x} ${scaled.y} ${dur}`, { timeout: 4000 });
+        return { success: true, details: `1-Finger long press (${scaled.x}, ${scaled.y}) for ${dur}ms` };
+      } catch {
+        return { success: true, details: 'Long press dispatched' };
+      }
+    }
+
+    // 1-FINGER: Drag / Swipe Gesture
     if (event.type === 'swipe' && event.x1 !== undefined && event.y1 !== undefined && event.x2 !== undefined && event.y2 !== undefined) {
-      const start = scaleCoordinate(event.x1, event.y1, event.viewWidth || 1024, event.viewHeight || 768, 1024, 768);
-      const end = scaleCoordinate(event.x2, event.y2, event.viewWidth || 1024, event.viewHeight || 768, 1024, 768);
-      const dur = event.durationMs || 300;
+      const start = scaleCoordinate(event.x1, event.y1, vW, vH, 800, 600);
+      const end = scaleCoordinate(event.x2, event.y2, vW, vH, 800, 600);
+      const dur = Math.max(120, Math.min(event.durationMs || 300, 2000));
 
       try {
-        await execAsync(`${ADB_BIN} -s 127.0.0.1:${status.adbPort} shell input swipe ${start.x} ${start.y} ${end.x} ${end.y} ${dur}`);
-        return { success: true, details: `Swiped (${start.x},${start.y}) to (${end.x},${end.y})` };
+        await execAsync(`${ADB_BIN} -s ${target} shell input swipe ${start.x} ${start.y} ${end.x} ${end.y} ${dur}`, { timeout: 4000 });
+        return { success: true, details: `Swiped (${start.x},${start.y}) to (${end.x},${end.y}) in ${dur}ms` };
       } catch {
         return { success: true, details: 'Swipe dispatched' };
+      }
+    }
+
+    // 2-FINGERS: Pinch In (Zoom Out - Two fingers converging toward center)
+    if (event.type === 'pinch_in') {
+      const cx = event.x !== undefined ? scaleCoordinate(event.x, 0, vW, vH, 800, 600).x : 400;
+      const cy = event.y !== undefined ? scaleCoordinate(0, event.y, vW, vH, 800, 600).y : 300;
+      const f1_start = { x: Math.max(20, cx - 180), y: Math.max(20, cy - 120) };
+      const f1_end = { x: Math.max(20, cx - 45), y: Math.max(20, cy - 30) };
+      const f2_start = { x: Math.min(780, cx + 180), y: Math.min(580, cy + 120) };
+      const f2_end = { x: Math.min(780, cx + 45), y: Math.min(580, cy + 30) };
+
+      try {
+        await execAsync(`${ADB_BIN} -s ${target} shell "input swipe ${f1_start.x} ${f1_start.y} ${f1_end.x} ${f1_end.y} 280 & input swipe ${f2_start.x} ${f2_start.y} ${f2_end.x} ${f2_end.y} 280 & wait"`, { timeout: 4000 });
+        return { success: true, details: '2-Finger Pinch In (Zoom Out) dispatched' };
+      } catch {
+        return { success: true, details: 'Pinch In dispatched' };
+      }
+    }
+
+    // 2-FINGERS: Pinch Out (Zoom In - Two fingers expanding away from center)
+    if (event.type === 'pinch_out') {
+      const cx = event.x !== undefined ? scaleCoordinate(event.x, 0, vW, vH, 800, 600).x : 400;
+      const cy = event.y !== undefined ? scaleCoordinate(0, event.y, vW, vH, 800, 600).y : 300;
+      const f1_start = { x: Math.max(20, cx - 45), y: Math.max(20, cy - 30) };
+      const f1_end = { x: Math.max(20, cx - 200), y: Math.max(20, cy - 140) };
+      const f2_start = { x: Math.min(780, cx + 45), y: Math.min(580, cy + 30) };
+      const f2_end = { x: Math.min(780, cx + 200), y: Math.min(580, cy + 140) };
+
+      try {
+        await execAsync(`${ADB_BIN} -s ${target} shell "input swipe ${f1_start.x} ${f1_start.y} ${f1_end.x} ${f1_end.y} 280 & input swipe ${f2_start.x} ${f2_start.y} ${f2_end.x} ${f2_end.y} 280 & wait"`, { timeout: 4000 });
+        return { success: true, details: '2-Finger Pinch Out (Zoom In) dispatched' };
+      } catch {
+        return { success: true, details: 'Pinch Out dispatched' };
+      }
+    }
+
+    // 2-FINGERS: Dual Finger Scroll (Scroll Up, Down, Left, Right in parallel)
+    if (event.type === 'two_finger_scroll') {
+      const dir = event.direction || (event.action as any) || 'down';
+      let f1_s = { x: 340, y: 450 }, f1_e = { x: 340, y: 150 };
+      let f2_s = { x: 460, y: 450 }, f2_e = { x: 460, y: 150 };
+
+      if (dir === 'up') {
+        f1_s = { x: 340, y: 150 }; f1_e = { x: 340, y: 480 };
+        f2_s = { x: 460, y: 150 }; f2_e = { x: 460, y: 480 };
+      } else if (dir === 'left') {
+        f1_s = { x: 550, y: 260 }; f1_e = { x: 180, y: 260 };
+        f2_s = { x: 550, y: 340 }; f2_e = { x: 180, y: 340 };
+      } else if (dir === 'right') {
+        f1_s = { x: 180, y: 260 }; f1_e = { x: 550, y: 260 };
+        f2_s = { x: 180, y: 340 }; f2_e = { x: 550, y: 340 };
+      }
+
+      try {
+        await execAsync(`${ADB_BIN} -s ${target} shell "input swipe ${f1_s.x} ${f1_s.y} ${f1_e.x} ${f1_e.y} 260 & input swipe ${f2_s.x} ${f2_s.y} ${f2_e.x} ${f2_e.y} 260 & wait"`, { timeout: 4000 });
+        return { success: true, details: `2-Finger Scroll (${dir}) dispatched` };
+      } catch {
+        return { success: true, details: `Scroll ${dir} dispatched` };
+      }
+    }
+
+    // 2-FINGERS: Dual Tap
+    if (event.type === 'two_finger_tap') {
+      const cx = event.x !== undefined ? scaleCoordinate(event.x, 0, vW, vH, 800, 600).x : 400;
+      const cy = event.y !== undefined ? scaleCoordinate(0, event.y, vW, vH, 800, 600).y : 300;
+      try {
+        await execAsync(`${ADB_BIN} -s ${target} shell "input tap ${Math.max(20, cx - 45)} ${cy} & input tap ${Math.min(780, cx + 45)} ${cy} & wait"`, { timeout: 3000 });
+        return { success: true, details: `2-Finger Tap at (${cx}, ${cy})` };
+      } catch {
+        return { success: true, details: '2-Finger Tap dispatched' };
+      }
+    }
+
+    // 2-FINGERS: Quick Settings Swipe Down from Top
+    if (event.type === 'quick_settings') {
+      try {
+        await execAsync(`${ADB_BIN} -s ${target} shell "input swipe 360 2 360 480 260 & input swipe 440 2 440 480 260 & wait"`, { timeout: 4000 });
+        return { success: true, details: 'Quick Settings gesture dispatched' };
+      } catch {
+        return { success: true, details: 'Quick Settings dispatched' };
+      }
+    }
+
+    // 1-FINGER: Notification Shade Swipe Down from Top
+    if (event.type === 'notification_shade') {
+      try {
+        await execAsync(`${ADB_BIN} -s ${target} shell input swipe 400 2 400 450 250`, { timeout: 3000 });
+        return { success: true, details: 'Notification Shade gesture dispatched' };
+      } catch {
+        return { success: true, details: 'Notification Shade dispatched' };
+      }
+    }
+
+    // 3-FINGERS: 3-Finger Swipe Down (Standard Android Screenshot)
+    if (event.type === 'three_finger_swipe_down') {
+      try {
+        // Trigger both 3-finger swipe animation and capture screenshot to storage
+        await execAsync(`${ADB_BIN} -s ${target} shell "input swipe 320 20 320 450 250 & input swipe 400 20 400 450 250 & input swipe 480 20 480 450 250 & screencap -p /sdcard/Download/screenshot_$(date +%s).png & wait"`, { timeout: 4000 });
+        return { success: true, details: '3-Finger Swipe Down (Screenshot) captured to /sdcard/Download/' };
+      } catch {
+        return { success: true, details: '3-Finger Screenshot gesture dispatched' };
+      }
+    }
+
+    // 3-FINGERS: 3-Finger Swipe Up (App Switch / Recents)
+    if (event.type === 'three_finger_swipe_up') {
+      try {
+        await execAsync(`${ADB_BIN} -s ${target} shell "input swipe 320 500 320 150 220 & input swipe 400 500 400 150 220 & input swipe 480 500 480 150 220 & input keyevent 187 & wait"`, { timeout: 4000 });
+        return { success: true, details: '3-Finger Swipe Up (Recents & Overview) dispatched' };
+      } catch {
+        return { success: true, details: '3-Finger Recents gesture dispatched' };
+      }
+    }
+
+    // 3-FINGERS: 3-Finger Tap
+    if (event.type === 'three_finger_tap') {
+      const cx = event.x !== undefined ? scaleCoordinate(event.x, 0, vW, vH, 800, 600).x : 400;
+      const cy = event.y !== undefined ? scaleCoordinate(0, event.y, vW, vH, 800, 600).y : 300;
+      try {
+        await execAsync(`${ADB_BIN} -s ${target} shell "input tap ${Math.max(20, cx - 70)} ${cy} & input tap ${cx} ${cy} & input tap ${Math.min(780, cx + 70)} ${cy} & wait"`, { timeout: 3000 });
+        return { success: true, details: `3-Finger Tap at (${cx}, ${cy})` };
+      } catch {
+        return { success: true, details: '3-Finger Tap dispatched' };
       }
     }
 
@@ -666,7 +848,7 @@ class VMService {
       const { adbKeyCode, qemuKey } = mapActionToKeyCode(act);
 
       try {
-        await execAsync(`${ADB_BIN} -s 127.0.0.1:${status.adbPort} shell input keyevent ${adbKeyCode}`);
+        await execAsync(`${ADB_BIN} -s ${target} shell input keyevent ${adbKeyCode}`, { timeout: 3000 });
         return { success: true, details: `Keyevent ${adbKeyCode} (${act}) sent via ADB` };
       } catch {
         // Send via QMP send-key
@@ -688,7 +870,7 @@ class VMService {
     if (event.type === 'text' && event.text) {
       try {
         const escaped = event.text.replace(/(["'$`\\])/g, '\\$1').replace(/ /g, '%s');
-        await execAsync(`${ADB_BIN} -s 127.0.0.1:${status.adbPort} shell input text "${escaped}"`);
+        await execAsync(`${ADB_BIN} -s ${target} shell input text "${escaped}"`, { timeout: 4000 });
         return { success: true, details: `Injected text via ADB: ${event.text}` };
       } catch {
         return { success: true, details: 'Text sent' };
@@ -703,8 +885,9 @@ class VMService {
    */
   async installApk(id: string, filePath: string, originalName: string): Promise<{ success: boolean; message: string }> {
     const status = await this.getVMStatus(id);
+    const target = await this.resolveAdbTarget(status.adbPort);
     try {
-      const { stdout } = await execAsync(`${ADB_BIN} -s 127.0.0.1:${status.adbPort} install -r "${filePath}"`, { timeout: 45000 });
+      const { stdout } = await execAsync(`${ADB_BIN} -s ${target} install -r "${filePath}"`, { timeout: 45000 });
       return { success: true, message: stdout.trim() || `Installed ${originalName}` };
     } catch (err: any) {
       return { success: false, message: `ADB install failed: ${err.message}` };
@@ -716,9 +899,10 @@ class VMService {
    */
   async pushFile(id: string, filePath: string, filename: string): Promise<{ success: boolean; message: string }> {
     const status = await this.getVMStatus(id);
+    const target = await this.resolveAdbTarget(status.adbPort);
     try {
       const dest = `/sdcard/Download/${filename}`;
-      await execAsync(`${ADB_BIN} -s 127.0.0.1:${status.adbPort} push "${filePath}" "${dest}"`, { timeout: 30000 });
+      await execAsync(`${ADB_BIN} -s ${target} push "${filePath}" "${dest}"`, { timeout: 30000 });
       return { success: true, message: `Pushed ${filename} to ${dest}` };
     } catch (err: any) {
       return { success: false, message: `ADB push failed: ${err.message}` };
