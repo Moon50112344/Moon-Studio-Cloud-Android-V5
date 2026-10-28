@@ -5,28 +5,36 @@
 
 import React, { useState, useRef } from 'react';
 import {
-  ArrowLeft,
-  Circle,
-  FileUp,
-  Keyboard,
-  Loader2,
-  PackagePlus,
-  Power,
-  RefreshCw,
-  Send,
-  Square,
-  Volume2,
-  VolumeX
-} from 'lucide-react';
+  ArrowLeftIcon,
+  CircleIcon,
+  SquareIcon,
+  PowerIcon,
+  RefreshIcon,
+  VolumeUpIcon,
+  VolumeDownIcon,
+  KeyboardIcon,
+  SendIcon,
+  PackageIcon,
+  FileUpIcon,
+  SpinnerIcon,
+  ZoomInIcon,
+  ZoomOutIcon,
+  ChevronDownIcon,
+  ChevronUpIcon
+} from './Icons';
 import { AndroidVMInfo } from '../server/vmService';
 
 interface ControlPanelProps {
   vm: AndroidVMInfo | null;
   onSendInput: (input: {
-    type: 'touch' | 'swipe' | 'key' | 'text';
+    type: 'touch' | 'swipe' | 'key' | 'text' | 'longpress' | 'pinch_in' | 'pinch_out' | 'two_finger_scroll' | 'two_finger_tap' | 'three_finger_swipe_down' | 'three_finger_swipe_up' | 'three_finger_tap' | 'quick_settings' | 'notification_shade';
     action?: string;
     text?: string;
     keyCode?: number | string;
+    direction?: 'up' | 'down' | 'left' | 'right';
+    x?: number;
+    y?: number;
+    durationMs?: number;
   }) => Promise<any>;
   onRestartVM: (id: string) => Promise<any>;
   onStopVM: (id: string) => Promise<any>;
@@ -46,7 +54,6 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
   const [isSendingKey, setIsSendingKey] = useState<string | null>(null);
   const [isInstalling, setIsInstalling] = useState<boolean>(false);
   const [isPushing, setIsPushing] = useState<boolean>(false);
-  const [notification, setNotification] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   const apkInputRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -64,31 +71,19 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
   const handleSendText = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!textInput.trim() || !vm || vm.status === 'stopped') return;
-
     try {
       await onSendInput({ type: 'text', text: textInput });
       setTextInput('');
-    } catch (err: any) {
-      setNotification({ type: 'error', message: err.message || 'Failed to send text' });
-    }
+    } catch {}
   };
 
   const handleApkSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !vm) return;
-
     try {
       setIsInstalling(true);
-      setNotification({ type: 'success', message: `Uploading & installing ${file.name} via ADB...` });
-      const res = await onInstallApk(vm.id, file);
-      if (res.success) {
-        setNotification({ type: 'success', message: `Successfully installed ${file.name}!` });
-      } else {
-        setNotification({ type: 'error', message: res.message || 'Installation failed' });
-      }
-    } catch (err: any) {
-      setNotification({ type: 'error', message: err.message || 'Failed to install APK' });
-    } finally {
+      await onInstallApk(vm.id, file);
+    } catch {} finally {
       setIsInstalling(false);
       if (apkInputRef.current) apkInputRef.current.value = '';
     }
@@ -97,38 +92,32 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
   const handleFileSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !vm) return;
-
     try {
       setIsPushing(true);
-      setNotification({ type: 'success', message: `Pushing ${file.name} to /sdcard/Download/...` });
-      const res = await onPushFile(vm.id, file);
-      setNotification({ type: res.success ? 'success' : 'error', message: res.message });
-    } catch (err: any) {
-      setNotification({ type: 'error', message: err.message || 'Failed to push file' });
-    } finally {
+      await onPushFile(vm.id, file);
+    } catch {} finally {
       setIsPushing(false);
       if (fileInputRef.current) fileInputRef.current.value = '';
     }
   };
 
-  const isEnabled = vm !== null && vm.status !== 'stopped';
+  const isEnabled = vm?.status === 'running';
 
   return (
-    <div className="flex flex-col gap-3 p-4 bg-[#0d1424] rounded-xl border border-[#1b263b] shadow-xl">
-      {/* Primary Android Navigation Bar (Back, Home, Recent Apps) */}
+    <div className="flex flex-col gap-4 p-4 bg-[#0d1424] rounded-xl border border-[#1b263b] shadow-xl">
+      {/* Navigation Bar (Back, Home, Recents) */}
       <div>
         <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2">
-          Navigation Bar
+          Điều hướng (Navigation Bar)
         </div>
         <div className="grid grid-cols-3 gap-2">
           <button
             onClick={() => triggerKeyAction('back')}
             disabled={!isEnabled}
             className="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-lg bg-[#121c33] hover:bg-[#1a284a] text-slate-200 hover:text-white border border-[#233355] transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed group"
-            title="Back Button (KEYCODE_BACK / ESC)"
-            aria-label="Back button"
+            title="Quay lại (KEYCODE_BACK)"
           >
-            <ArrowLeft className="w-4 h-4 text-[#2f8bff] group-hover:-translate-x-0.5 transition-transform" />
+            <ArrowLeftIcon className="w-4 h-4 text-[#2f8bff]" />
             <span className="text-xs font-medium">Back</span>
           </button>
 
@@ -136,10 +125,9 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
             onClick={() => triggerKeyAction('home')}
             disabled={!isEnabled}
             className="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-lg bg-[#121c33] hover:bg-[#1a284a] text-slate-200 hover:text-white border border-[#233355] transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed group"
-            title="Home Button (KEYCODE_HOME)"
-            aria-label="Home button"
+            title="Màn hình chính (KEYCODE_HOME)"
           >
-            <Circle className="w-4 h-4 text-[#2f8bff] group-hover:scale-110 transition-transform" />
+            <CircleIcon className="w-4 h-4 text-[#2f8bff]" />
             <span className="text-xs font-medium">Home</span>
           </button>
 
@@ -147,10 +135,9 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
             onClick={() => triggerKeyAction('recent')}
             disabled={!isEnabled}
             className="flex items-center justify-center gap-1.5 py-2.5 px-3 rounded-lg bg-[#121c33] hover:bg-[#1a284a] text-slate-200 hover:text-white border border-[#233355] transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed group"
-            title="Recent Apps (KEYCODE_APP_SWITCH)"
-            aria-label="Recent apps"
+            title="Ứng dụng gần đây (KEYCODE_APP_SWITCH)"
           >
-            <Square className="w-3.5 h-3.5 text-[#2f8bff] group-hover:rotate-6 transition-transform" />
+            <SquareIcon className="w-3.5 h-3.5 text-[#2f8bff]" />
             <span className="text-xs font-medium">Recents</span>
           </button>
         </div>
@@ -159,26 +146,26 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
       {/* Hardware Actions (Power, Restart, Volume Up, Volume Down) */}
       <div>
         <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2">
-          Hardware Buttons
+          Phím phần cứng
         </div>
         <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
           <button
             onClick={() => triggerKeyAction('power')}
             disabled={!isEnabled}
-            className="flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-lg bg-[#121c33] hover:bg-rose-950/40 text-slate-300 hover:text-rose-400 border border-[#233355] hover:border-rose-900/50 transition-all cursor-pointer disabled:opacity-40"
-            title="Power key toggle screen"
+            className="flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-lg bg-[#121c33] hover:bg-rose-950/40 text-slate-300 hover:text-rose-400 border border-[#233355] transition-all cursor-pointer disabled:opacity-40"
+            title="Bật/Tắt màn hình"
           >
-            <Power className="w-3.5 h-3.5 text-rose-500" />
+            <PowerIcon className="w-3.5 h-3.5 text-rose-500" />
             <span className="text-xs">Power</span>
           </button>
 
           <button
             onClick={() => vm && onRestartVM(vm.id)}
             disabled={!isEnabled}
-            className="flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-lg bg-[#121c33] hover:bg-amber-950/40 text-slate-300 hover:text-amber-400 border border-[#233355] hover:border-amber-900/50 transition-all cursor-pointer disabled:opacity-40"
-            title="Reboot Android VM process"
+            className="flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-lg bg-[#121c33] hover:bg-amber-950/40 text-slate-300 hover:text-amber-400 border border-[#233355] transition-all cursor-pointer disabled:opacity-40"
+            title="Khởi động lại QEMU"
           >
-            <RefreshCw className="w-3.5 h-3.5 text-amber-400" />
+            <RefreshIcon className="w-3.5 h-3.5 text-amber-400" />
             <span className="text-xs">Restart</span>
           </button>
 
@@ -186,9 +173,9 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
             onClick={() => triggerKeyAction('volume_up')}
             disabled={!isEnabled}
             className="flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-lg bg-[#121c33] hover:bg-[#1a284a] text-slate-300 hover:text-white border border-[#233355] transition-all cursor-pointer disabled:opacity-40"
-            title="Volume Up (KEYCODE_VOLUME_UP)"
+            title="Tăng âm lượng"
           >
-            <Volume2 className="w-3.5 h-3.5 text-cyan-400" />
+            <VolumeUpIcon className="w-3.5 h-3.5 text-cyan-400" />
             <span className="text-xs">Vol +</span>
           </button>
 
@@ -196,9 +183,9 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
             onClick={() => triggerKeyAction('volume_down')}
             disabled={!isEnabled}
             className="flex items-center justify-center gap-1.5 py-2 px-2.5 rounded-lg bg-[#121c33] hover:bg-[#1a284a] text-slate-300 hover:text-white border border-[#233355] transition-all cursor-pointer disabled:opacity-40"
-            title="Volume Down (KEYCODE_VOLUME_DOWN)"
+            title="Giảm âm lượng"
           >
-            <VolumeX className="w-3.5 h-3.5 text-cyan-400" />
+            <VolumeDownIcon className="w-3.5 h-3.5 text-cyan-400" />
             <span className="text-xs">Vol -</span>
           </button>
         </div>
@@ -207,7 +194,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
       {/* Multi-Finger Gestures & Touch Controls */}
       <div>
         <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2 flex items-center justify-between">
-          <span>Cử chỉ đa ngón (Multi-Touch Gestures)</span>
+          <span>Cử chỉ đa ngón (Multi-Touch)</span>
           <span className="text-[10px] text-[#2f8bff] font-normal">1, 2 & 3 Ngón</span>
         </div>
 
@@ -216,7 +203,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
           <div className="text-[10px] text-slate-400 font-medium mb-1">👆 1 Ngón (Single Finger)</div>
           <div className="grid grid-cols-3 gap-1.5">
             <button
-              onClick={() => onSendInput({ type: 'touch', x: 400, y: 300 } as any)}
+              onClick={() => onSendInput({ type: 'touch', x: 400, y: 300 })}
               disabled={!isEnabled}
               className="py-1.5 px-2 rounded-lg bg-[#10192e] hover:bg-[#16223e] border border-[#213052] text-slate-300 hover:text-white text-[11px] transition-all cursor-pointer disabled:opacity-40"
               title="Chạm 1 ngón vào giữa màn hình"
@@ -224,15 +211,15 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
               Chạm giữa
             </button>
             <button
-              onClick={() => onSendInput({ type: 'longpress', x: 400, y: 300, durationMs: 1000 } as any)}
+              onClick={() => onSendInput({ type: 'longpress', x: 400, y: 300, durationMs: 1000 })}
               disabled={!isEnabled}
-              className="py-1.5 px-2 rounded-lg bg-[#10192e] hover:bg-[#16223e] border border-[#213052] text-slate-300 hover:text-white text-[11px] transition-all cursor-pointer disabled:opacity-40"
-              title="Nhấn giữ 1 giây để mở menu ngữ cảnh"
+              className="py-1.5 px-2 rounded-lg bg-[#10192e] hover:bg-[#16223e] border border-[#213052] text-amber-300 hover:text-amber-200 text-[11px] transition-all cursor-pointer disabled:opacity-40"
+              title="Nhấn giữ 1 giây"
             >
               Nhấn giữ 1s
             </button>
             <button
-              onClick={() => onSendInput({ type: 'notification_shade' } as any)}
+              onClick={() => onSendInput({ type: 'notification_shade' })}
               disabled={!isEnabled}
               className="py-1.5 px-2 rounded-lg bg-[#10192e] hover:bg-[#16223e] border border-[#213052] text-slate-300 hover:text-white text-[11px] transition-all cursor-pointer disabled:opacity-40"
               title="Kéo thanh thông báo từ trên xuống"
@@ -247,50 +234,54 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
           <div className="text-[10px] text-slate-400 font-medium mb-1">✌️ 2 Ngón (Dual Fingers)</div>
           <div className="grid grid-cols-3 gap-1.5">
             <button
-              onClick={() => onSendInput({ type: 'pinch_out' } as any)}
+              onClick={() => onSendInput({ type: 'pinch_out' })}
               disabled={!isEnabled}
-              className="py-1.5 px-2 rounded-lg bg-[#10192e] hover:bg-[#16223e] border border-[#213052] text-slate-300 hover:text-cyan-300 text-[11px] transition-all cursor-pointer disabled:opacity-40"
-              title="Phóng to 2 ngón (Zoom In)"
+              className="py-1.5 px-2 rounded-lg bg-[#10192e] hover:bg-[#16223e] border border-[#213052] text-cyan-300 text-[11px] transition-all cursor-pointer disabled:opacity-40 flex items-center justify-center gap-1"
+              title="Phóng to 2 ngón"
             >
-              🔍 Phóng to
+              <ZoomInIcon className="w-3 h-3" />
+              <span>Phóng to</span>
             </button>
             <button
-              onClick={() => onSendInput({ type: 'pinch_in' } as any)}
+              onClick={() => onSendInput({ type: 'pinch_in' })}
               disabled={!isEnabled}
-              className="py-1.5 px-2 rounded-lg bg-[#10192e] hover:bg-[#16223e] border border-[#213052] text-slate-300 hover:text-cyan-300 text-[11px] transition-all cursor-pointer disabled:opacity-40"
-              title="Thu nhỏ 2 ngón (Zoom Out)"
+              className="py-1.5 px-2 rounded-lg bg-[#10192e] hover:bg-[#16223e] border border-[#213052] text-cyan-300 text-[11px] transition-all cursor-pointer disabled:opacity-40 flex items-center justify-center gap-1"
+              title="Thu nhỏ 2 ngón"
             >
-              🔎 Thu nhỏ
+              <ZoomOutIcon className="w-3 h-3" />
+              <span>Thu nhỏ</span>
             </button>
             <button
-              onClick={() => onSendInput({ type: 'quick_settings' } as any)}
+              onClick={() => onSendInput({ type: 'quick_settings' })}
               disabled={!isEnabled}
-              className="py-1.5 px-2 rounded-lg bg-[#10192e] hover:bg-[#16223e] border border-[#213052] text-slate-300 hover:text-cyan-300 text-[11px] transition-all cursor-pointer disabled:opacity-40"
-              title="Kéo 2 ngón từ trên xuống mở Cài đặt nhanh"
+              className="py-1.5 px-2 rounded-lg bg-[#10192e] hover:bg-[#16223e] border border-[#213052] text-cyan-300 text-[11px] transition-all cursor-pointer disabled:opacity-40"
+              title="Cài đặt nhanh 2 ngón"
             >
               Cài đặt nhanh
             </button>
             <button
-              onClick={() => onSendInput({ type: 'two_finger_scroll', direction: 'down' } as any)}
+              onClick={() => onSendInput({ type: 'two_finger_scroll', direction: 'down' })}
               disabled={!isEnabled}
-              className="py-1.5 px-2 rounded-lg bg-[#10192e] hover:bg-[#16223e] border border-[#213052] text-slate-300 hover:text-cyan-300 text-[11px] transition-all cursor-pointer disabled:opacity-40"
-              title="Cuộn trang xuống bằng 2 ngón"
+              className="py-1.5 px-2 rounded-lg bg-[#10192e] hover:bg-[#16223e] border border-[#213052] text-slate-300 hover:text-white text-[11px] transition-all cursor-pointer disabled:opacity-40 flex items-center justify-center gap-1"
+              title="Cuộn trang xuống"
             >
-              ⬇️ Cuộn xuống
+              <ChevronDownIcon className="w-3 h-3" />
+              <span>Cuộn xuống</span>
             </button>
             <button
-              onClick={() => onSendInput({ type: 'two_finger_scroll', direction: 'up' } as any)}
+              onClick={() => onSendInput({ type: 'two_finger_scroll', direction: 'up' })}
               disabled={!isEnabled}
-              className="py-1.5 px-2 rounded-lg bg-[#10192e] hover:bg-[#16223e] border border-[#213052] text-slate-300 hover:text-cyan-300 text-[11px] transition-all cursor-pointer disabled:opacity-40"
-              title="Cuộn trang lên bằng 2 ngón"
+              className="py-1.5 px-2 rounded-lg bg-[#10192e] hover:bg-[#16223e] border border-[#213052] text-slate-300 hover:text-white text-[11px] transition-all cursor-pointer disabled:opacity-40 flex items-center justify-center gap-1"
+              title="Cuộn trang lên"
             >
-              ⬆️ Cuộn lên
+              <ChevronUpIcon className="w-3 h-3" />
+              <span>Cuộn lên</span>
             </button>
             <button
-              onClick={() => onSendInput({ type: 'two_finger_tap', x: 400, y: 300 } as any)}
+              onClick={() => onSendInput({ type: 'two_finger_tap', x: 400, y: 300 })}
               disabled={!isEnabled}
-              className="py-1.5 px-2 rounded-lg bg-[#10192e] hover:bg-[#16223e] border border-[#213052] text-slate-300 hover:text-cyan-300 text-[11px] transition-all cursor-pointer disabled:opacity-40"
-              title="Chạm kép 2 ngón đồng thời"
+              className="py-1.5 px-2 rounded-lg bg-[#10192e] hover:bg-[#16223e] border border-[#213052] text-slate-300 hover:text-white text-[11px] transition-all cursor-pointer disabled:opacity-40"
+              title="Chạm 2 ngón"
             >
               Chạm kép
             </button>
@@ -302,18 +293,18 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
           <div className="text-[10px] text-slate-400 font-medium mb-1">🖐️ 3 Ngón (Triple Fingers)</div>
           <div className="grid grid-cols-2 gap-1.5">
             <button
-              onClick={() => onSendInput({ type: 'three_finger_swipe_down' } as any)}
+              onClick={() => onSendInput({ type: 'three_finger_swipe_down' })}
               disabled={!isEnabled}
-              className="py-1.5 px-2 rounded-lg bg-[#10192e] hover:bg-[#16223e] border border-[#213052] text-slate-300 hover:text-emerald-300 text-[11px] transition-all cursor-pointer disabled:opacity-40 flex items-center justify-center gap-1"
-              title="Vuốt 3 ngón xuống để chụp ảnh màn hình"
+              className="py-1.5 px-2 rounded-lg bg-[#10192e] hover:bg-[#16223e] border border-[#213052] text-emerald-300 text-[11px] transition-all cursor-pointer disabled:opacity-40 flex items-center justify-center gap-1"
+              title="Chụp ảnh màn hình bằng vuốt 3 ngón"
             >
               <span>📸 Chụp màn hình (3 ngón)</span>
             </button>
             <button
-              onClick={() => onSendInput({ type: 'three_finger_swipe_up' } as any)}
+              onClick={() => onSendInput({ type: 'three_finger_swipe_up' })}
               disabled={!isEnabled}
-              className="py-1.5 px-2 rounded-lg bg-[#10192e] hover:bg-[#16223e] border border-[#213052] text-slate-300 hover:text-emerald-300 text-[11px] transition-all cursor-pointer disabled:opacity-40 flex items-center justify-center gap-1"
-              title="Vuốt 3 ngón lên để mở màn hình đa nhiệm"
+              className="py-1.5 px-2 rounded-lg bg-[#10192e] hover:bg-[#16223e] border border-[#213052] text-emerald-300 text-[11px] transition-all cursor-pointer disabled:opacity-40 flex items-center justify-center gap-1"
+              title="Mở danh sách đa nhiệm"
             >
               <span>🔄 Đa nhiệm (3 ngón)</span>
             </button>
@@ -325,8 +316,8 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
       <div>
         <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2 flex items-center justify-between">
           <span className="flex items-center gap-1.5">
-            <Keyboard className="w-3.5 h-3.5 text-[#2f8bff]" />
-            Direct Keyboard Input
+            <KeyboardIcon className="w-3.5 h-3.5 text-[#2f8bff]" />
+            Nhập văn bản bàn phím
           </span>
           <span className="text-[10px] text-slate-500 font-normal">ADB Text Injection</span>
         </div>
@@ -335,7 +326,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
             type="text"
             value={textInput}
             onChange={(e) => setTextInput(e.target.value)}
-            placeholder={isEnabled ? "Type text or URL to inject..." : "Device offline"}
+            placeholder={isEnabled ? "Nhập văn bản hoặc link URL..." : "Thiết bị chưa chạy"}
             disabled={!isEnabled}
             className="flex-1 bg-[#070b14] border border-[#1e2a47] rounded-lg px-3 py-1.5 text-xs text-slate-200 placeholder-slate-500 focus:outline-none focus:border-[#2f8bff] focus:ring-1 focus:ring-[#2f8bff] disabled:opacity-40"
           />
@@ -344,8 +335,8 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
             disabled={!isEnabled || !textInput.trim()}
             className="px-3 py-1.5 rounded-lg bg-[#2f8bff] hover:bg-[#2575dc] text-white text-xs font-medium flex items-center gap-1 transition-all cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            <Send className="w-3.5 h-3.5" />
-            <span>Send</span>
+            <SendIcon className="w-3.5 h-3.5" />
+            <span>Gửi</span>
           </button>
         </form>
       </div>
@@ -353,7 +344,7 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
       {/* APK & File Upload Actions */}
       <div>
         <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2">
-          Package & Storage Management
+          Cài đặt APK & Bộ nhớ
         </div>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           {/* APK Installer */}
@@ -370,13 +361,13 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
             className="flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg bg-[#10192e] hover:bg-[#16223e] border border-[#213052] text-slate-200 hover:text-white transition-all cursor-pointer disabled:opacity-40 group"
           >
             {isInstalling ? (
-              <Loader2 className="w-4 h-4 animate-spin text-[#2f8bff]" />
+              <SpinnerIcon className="w-4 h-4 animate-spin text-[#2f8bff]" />
             ) : (
-              <PackagePlus className="w-4 h-4 text-emerald-400 group-hover:scale-110 transition-transform" />
+              <PackageIcon className="w-4 h-4 text-emerald-400 group-hover:scale-110 transition-transform" />
             )}
             <div className="text-left">
-              <div className="text-xs font-medium">Install APK</div>
-              <div className="text-[10px] text-slate-400">Deploy Android package</div>
+              <div className="text-xs font-medium">Cài đặt APK</div>
+              <div className="text-[10px] text-slate-400">Gói Android .apk</div>
             </div>
           </button>
 
@@ -393,36 +384,17 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
             className="flex items-center justify-center gap-2 py-2.5 px-3 rounded-lg bg-[#10192e] hover:bg-[#16223e] border border-[#213052] text-slate-200 hover:text-white transition-all cursor-pointer disabled:opacity-40 group"
           >
             {isPushing ? (
-              <Loader2 className="w-4 h-4 animate-spin text-[#2f8bff]" />
+              <SpinnerIcon className="w-4 h-4 animate-spin text-[#2f8bff]" />
             ) : (
-              <FileUp className="w-4 h-4 text-cyan-400 group-hover:scale-110 transition-transform" />
+              <FileUpIcon className="w-4 h-4 text-cyan-400 group-hover:scale-110 transition-transform" />
             )}
             <div className="text-left">
-              <div className="text-xs font-medium">Push File</div>
-              <div className="text-[10px] text-slate-400">To /sdcard/Download/</div>
+              <div className="text-xs font-medium">Đẩy tập tin</div>
+              <div className="text-[10px] text-slate-400">Vào /sdcard/Download/</div>
             </div>
           </button>
         </div>
       </div>
-
-      {/* Notification Toast */}
-      {notification && (
-        <div
-          className={`p-2.5 rounded-lg text-xs flex items-center justify-between border ${
-            notification.type === 'success'
-              ? 'bg-emerald-950/40 border-emerald-800 text-emerald-300'
-              : 'bg-rose-950/40 border-rose-800 text-rose-300'
-          }`}
-        >
-          <span>{notification.message}</span>
-          <button
-            onClick={() => setNotification(null)}
-            className="text-slate-400 hover:text-white text-xs px-1"
-          >
-            ×
-          </button>
-        </div>
-      )}
     </div>
   );
 };

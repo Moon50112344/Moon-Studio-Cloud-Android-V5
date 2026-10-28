@@ -5,17 +5,14 @@
 
 import React, { useState, useEffect } from 'react';
 import {
-  AppWindow,
-  Cpu,
-  FileText,
-  HardDrive,
-  Info,
-  Layers,
-  Play,
-  RefreshCw,
-  Terminal,
-  Zap
-} from 'lucide-react';
+  AppWindowIcon,
+  CpuIcon,
+  HardDriveIcon,
+  InfoIcon,
+  PlayIcon,
+  RefreshIcon,
+  TerminalIcon,
+} from './Icons';
 import { AndroidVMInfo } from '../server/vmService';
 
 interface VMDetailTabsProps {
@@ -108,7 +105,7 @@ export const VMDetailTabs: React.FC<VMDetailTabsProps> = ({ vm }) => {
                 : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
           >
-            <AppWindow className="w-3.5 h-3.5 text-[#2f8bff]" />
+            <AppWindowIcon className="w-3.5 h-3.5 text-[#2f8bff]" />
             <span>Installed Applications</span>
           </button>
 
@@ -120,7 +117,7 @@ export const VMDetailTabs: React.FC<VMDetailTabsProps> = ({ vm }) => {
                 : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
           >
-            <Terminal className="w-3.5 h-3.5 text-cyan-400" />
+            <TerminalIcon className="w-3.5 h-3.5 text-cyan-400" />
             <span>System Logs & Telemetry</span>
           </button>
 
@@ -132,7 +129,7 @@ export const VMDetailTabs: React.FC<VMDetailTabsProps> = ({ vm }) => {
                 : 'border-transparent text-slate-400 hover:text-slate-200'
             }`}
           >
-            <Info className="w-3.5 h-3.5 text-amber-400" />
+            <InfoIcon className="w-3.5 h-3.5 text-amber-400" />
             <span>VM Architecture & Sockets</span>
           </button>
         </div>
@@ -144,7 +141,7 @@ export const VMDetailTabs: React.FC<VMDetailTabsProps> = ({ vm }) => {
             className="p-1 text-slate-400 hover:text-white rounded hover:bg-[#152038] cursor-pointer"
             title="Refresh package list"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${isLoadingApps ? 'animate-spin' : ''}`} />
+            <RefreshIcon className={`w-3.5 h-3.5 ${isLoadingApps ? 'animate-spin' : ''}`} />
           </button>
         )}
 
@@ -155,7 +152,7 @@ export const VMDetailTabs: React.FC<VMDetailTabsProps> = ({ vm }) => {
             className="p-1 text-slate-400 hover:text-white rounded hover:bg-[#152038] cursor-pointer"
             title="Refresh logs"
           >
-            <RefreshCw className={`w-3.5 h-3.5 ${isLoadingLogs ? 'animate-spin' : ''}`} />
+            <RefreshIcon className={`w-3.5 h-3.5 ${isLoadingLogs ? 'animate-spin' : ''}`} />
           </button>
         )}
       </div>
@@ -203,7 +200,7 @@ export const VMDetailTabs: React.FC<VMDetailTabsProps> = ({ vm }) => {
                         className="p-1 rounded bg-[#131d33] hover:bg-[#2f8bff] text-slate-300 hover:text-white transition-colors cursor-pointer"
                         title={`Launch ${shortName} on screen`}
                       >
-                        <Play className="w-3 h-3 fill-current" />
+                        <PlayIcon className="w-3 h-3 fill-current" />
                       </button>
                     </div>
                   );
@@ -250,7 +247,7 @@ export const VMDetailTabs: React.FC<VMDetailTabsProps> = ({ vm }) => {
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
             <div className="p-3 rounded-lg bg-[#070b14] border border-[#1b263b] flex flex-col gap-2">
               <h4 className="font-semibold text-slate-200 flex items-center gap-1.5">
-                <Cpu className="w-4 h-4 text-[#2f8bff]" />
+                <CpuIcon className="w-4 h-4 text-[#2f8bff]" />
                 Process & Virtualization
               </h4>
               <div className="flex justify-between border-b border-[#141d33] py-1 text-slate-400">
@@ -273,7 +270,7 @@ export const VMDetailTabs: React.FC<VMDetailTabsProps> = ({ vm }) => {
 
             <div className="p-3 rounded-lg bg-[#070b14] border border-[#1b263b] flex flex-col gap-2">
               <h4 className="font-semibold text-slate-200 flex items-center gap-1.5">
-                <HardDrive className="w-4 h-4 text-cyan-400" />
+                <HardDriveIcon className="w-4 h-4 text-cyan-400" />
                 Network Sockets & Disks
               </h4>
               <div className="flex justify-between border-b border-[#141d33] py-1 text-slate-400">

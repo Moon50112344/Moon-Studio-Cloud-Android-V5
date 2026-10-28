@@ -10,6 +10,7 @@ import { ControlPanel } from './components/ControlPanel';
 import { VMList } from './components/VMList';
 import { VMDetailTabs } from './components/VMDetailTabs';
 import { CreateVMModal } from './components/CreateVMModal';
+import { ServerLogConsole } from './components/ServerLogConsole';
 import { AndroidVMInfo } from './server/vmService';
 
 export default function App() {
@@ -227,6 +228,12 @@ export default function App() {
             />
           </div>
         </div>
+
+        {/* Real-Time Live Server & Android Terminal Log Console */}
+        <ServerLogConsole
+          onRestartVM={() => selectedVM && handleRestartVM(selectedVM.id)}
+          activeVmId={selectedVM?.id}
+        />
 
         {/* Detailed Tabs: Apps, Logs, Architecture */}
         <VMDetailTabs vm={selectedVM} />

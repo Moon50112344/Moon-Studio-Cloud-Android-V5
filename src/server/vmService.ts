@@ -9,9 +9,18 @@ import path from 'path';
 import net from 'net';
 import os from 'os';
 import util from 'util';
+import sharp from 'sharp';
 import { allocatePorts, canCreateVM, mapActionToKeyCode, scaleCoordinate, MAX_VMS_PER_USER } from './vmRules';
 
 const execAsync = util.promisify(exec);
+
+export interface ServerLogEntry {
+  id: string;
+  timestamp: string;
+  level: 'info' | 'warn' | 'error' | 'success';
+  source: 'SERVER' | 'QEMU' | 'ADB' | 'TOUCH';
+  message: string;
+}
 
 export interface AndroidVMInfo {
   id: string;
@@ -41,9 +50,19 @@ import { assetManager } from './assetManager';
 const VM_BASE_DIR = assetManager.getInstancesDir();
 
 function findBinary(name: string, defaultPath: string): string {
-  if (fs.existsSync(defaultPath)) return defaultPath;
+  try {
+    if (fs.existsSync(defaultPath)) {
+      fs.accessSync(defaultPath, fs.constants.X_OK);
+      return defaultPath;
+    }
+  } catch {}
   const localRepoPath = path.join(process.cwd(), 'bin', name);
-  if (fs.existsSync(localRepoPath)) return localRepoPath;
+  try {
+    if (fs.existsSync(localRepoPath)) {
+      fs.accessSync(localRepoPath, fs.constants.X_OK);
+      return localRepoPath;
+    }
+  } catch {}
   return name;
 }
 
@@ -53,15 +72,37 @@ const ADB_BIN = findBinary('adb', '/usr/bin/adb');
 class VMService {
   private lastFrames: Map<string, Buffer> = new Map();
   private lastFrameTimes: Map<string, number> = new Map();
+  private logs: ServerLogEntry[] = [];
+  private isCapturing: Map<string, boolean> = new Map();
 
   constructor() {
     try {
       if (!fs.existsSync(VM_BASE_DIR)) {
         fs.mkdirSync(VM_BASE_DIR, { recursive: true });
       }
+      this.addLog('SERVER', `VM engine initialized. QEMU=${QEMU_BIN}, ADB=${ADB_BIN}`, 'info');
     } catch (err: any) {
       console.warn('VM directory initialization warning:', err.message);
     }
+    this.startBackgroundFrameLoop();
+  }
+
+  public addLog(source: 'SERVER' | 'QEMU' | 'ADB' | 'TOUCH', message: string, level: 'info' | 'warn' | 'error' | 'success' = 'info') {
+    const entry: ServerLogEntry = {
+      id: Math.random().toString(36).substring(2, 9),
+      timestamp: new Date().toLocaleTimeString('vi-VN', { hour12: false }),
+      level,
+      source,
+      message,
+    };
+    this.logs.push(entry);
+    if (this.logs.length > 250) {
+      this.logs.shift();
+    }
+  }
+
+  public getLogsList(): ServerLogEntry[] {
+    return this.logs;
   }
 
   /**
@@ -403,7 +444,9 @@ class VMService {
         '-drive', `file=${assets.isoPath},format=raw,index=0,if=ide,media=cdrom`,
         '-drive', `file=${dataImg},format=raw,index=1,if=ide`,
         '-netdev', `user,id=net0,hostfwd=tcp:127.0.0.1:${config.adbPort}-:5555`,
-        '-device', 'e1000,netdev=net0',
+        '-device', 'e1000,netdev=net0,romfile=',
+        '-usb',
+        '-device', 'usb-tablet',
         '-vga', 'std',
         '-display', 'none',
         '-vnc', `127.0.0.1:${config.vncDisplay}`,
@@ -424,7 +467,9 @@ class VMService {
         '-drive', `file=${cacheImg},format=raw,index=1,if=ide`,
         '-drive', `file=${dataImg},format=raw,index=2,if=ide`,
         '-netdev', `user,id=net0,hostfwd=tcp:127.0.0.1:${config.adbPort}-:5555`,
-        '-device', 'e1000,netdev=net0',
+        '-device', 'e1000,netdev=net0,romfile=',
+        '-usb',
+        '-device', 'usb-tablet',
         '-vga', 'std',
         '-display', 'none',
         '-vnc', `127.0.0.1:${config.vncDisplay}`,
@@ -562,7 +607,97 @@ class VMService {
   }
 
   /**
-   * Captures the live hardware framebuffer directly from QEMU virtual machine via QMP screendump.
+   * Fast hardware screen frame grabber using QMP screendump and sharp raw pixel encoding.
+   */
+  async grabFrame(id: string, qmpPort: number): Promise<Buffer | null> {
+    if (this.isCapturing.get(id)) {
+      return this.lastFrames.get(id) || null;
+    }
+    this.isCapturing.set(id, true);
+    const tempPpm = path.join(os.tmpdir(), `screen_${id}.ppm`);
+
+    try {
+      await this.sendQMPCommand(qmpPort, {
+        execute: 'screendump',
+        arguments: { filename: tempPpm },
+      });
+
+      if (fs.existsSync(tempPpm)) {
+        const ppmData = await fs.promises.readFile(tempPpm);
+        // Parse P6 NetPBM header: P6\n<width> <height>\n<maxval>\n
+        let offset = 2;
+        const tokens: string[] = [];
+        while (tokens.length < 3 && offset < ppmData.length) {
+          while (offset < ppmData.length && (ppmData[offset] === 32 || ppmData[offset] === 10 || ppmData[offset] === 13 || ppmData[offset] === 9)) {
+            offset++;
+          }
+          if (offset < ppmData.length && ppmData[offset] === 35) { // # comment
+            while (offset < ppmData.length && ppmData[offset] !== 10) {
+              offset++;
+            }
+            continue;
+          }
+          const tokenStart = offset;
+          while (offset < ppmData.length && ppmData[offset] > 32) {
+            offset++;
+          }
+          if (offset > tokenStart) {
+            tokens.push(ppmData.slice(tokenStart, offset).toString('ascii'));
+          }
+        }
+        if (offset < ppmData.length && (ppmData[offset] === 32 || ppmData[offset] === 10 || ppmData[offset] === 13 || ppmData[offset] === 9)) {
+          offset++;
+        }
+
+        const width = parseInt(tokens[0], 10) || 800;
+        const height = parseInt(tokens[1], 10) || 600;
+        const rawPixels = ppmData.slice(offset);
+
+        if (rawPixels.length >= width * height * 3) {
+          const buffer = await sharp(rawPixels, {
+            raw: {
+              width,
+              height,
+              channels: 3,
+            },
+          })
+            .jpeg({ quality: 80, progressive: false })
+            .toBuffer();
+
+          this.lastFrames.set(id, buffer);
+          this.lastFrameTimes.set(id, Date.now());
+          return buffer;
+        }
+      }
+    } catch {
+      // return existing frame if available
+    } finally {
+      this.isCapturing.set(id, false);
+      if (fs.existsSync(tempPpm)) fs.unlink(tempPpm, () => {});
+    }
+    return this.lastFrames.get(id) || null;
+  }
+
+  /**
+   * Background frame grabber loop running every 55ms (~18 FPS) to ensure 0ms latency for client requests.
+   */
+  private startBackgroundFrameLoop() {
+    setInterval(async () => {
+      for (const [id, lastTime] of this.lastFrameTimes.entries()) {
+        if (Date.now() - lastTime < 25000) {
+          try {
+            const status = await this.getVMStatus(id);
+            if (status.status === 'running' || status.status === 'booting') {
+              await this.grabFrame(id, status.qmpPort);
+            }
+          } catch {}
+        }
+      }
+    }, 55);
+  }
+
+  /**
+   * Captures the live hardware framebuffer directly from QEMU virtual machine via QMP screendump + sharp.
    */
   async captureScreen(id: string): Promise<Buffer> {
     const status = await this.getVMStatus(id);
@@ -570,35 +705,17 @@ class VMService {
       throw new Error(`VM ${id} is not running`);
     }
 
-    const tempPpm = path.join(os.tmpdir(), `screen_${id}_${Date.now()}.ppm`);
-    const tempJpg = path.join(os.tmpdir(), `screen_${id}_${Date.now()}.jpg`);
+    const cached = this.lastFrames.get(id);
+    const lastTime = this.lastFrameTimes.get(id) || 0;
 
-    try {
-      await this.sendQMPCommand(status.qmpPort, {
-        execute: 'screendump',
-        arguments: { filename: tempPpm },
-      });
-
-      if (fs.existsSync(tempPpm)) {
-        await execAsync(`convert "${tempPpm}" -quality 82 -resize 1024x768\\> "${tempJpg}"`);
-        const buffer = fs.readFileSync(tempJpg);
-        this.lastFrames.set(id, buffer);
-        this.lastFrameTimes.set(id, Date.now());
-        return buffer;
-      }
-    } catch {
-      // return last genuine frame if available
-      if (this.lastFrames.has(id)) {
-        return this.lastFrames.get(id)!;
-      }
-    } finally {
-      if (fs.existsSync(tempPpm)) fs.unlink(tempPpm, () => {});
-      if (fs.existsSync(tempJpg)) fs.unlink(tempJpg, () => {});
+    // Return instant cached buffer if available, and trigger asynchronous refresh if stale
+    if (cached && Date.now() - lastTime < 100) {
+      return cached;
     }
 
-    if (this.lastFrames.has(id)) {
-      return this.lastFrames.get(id)!;
-    }
+    const fresh = await this.grabFrame(id, status.qmpPort);
+    if (fresh) return fresh;
+    if (cached) return cached;
 
     throw new Error('Framebuffer initializing');
   }
@@ -628,11 +745,12 @@ class VMService {
 
   /**
    * Dispatches touch, mouse click, gesture, or key navigation directly to the running QEMU hardware VM.
-   * Supports 1-finger (tap, drag, long-press), 2-finger (pinch in/out, dual-scroll, dual-tap, quick settings),
+   * Supports continuous dragging / joystick hold (touch_down, touch_move, touch_up),
+   * 1-finger (tap, drag, long-press), 2-finger (pinch in/out, dual-scroll, dual-tap, quick settings),
    * and 3-finger gestures (screenshot, recents/app-switch, triple-tap).
    */
   async sendInput(id: string, event: {
-    type: 'touch' | 'swipe' | 'key' | 'text' | 'longpress' | 'pinch_in' | 'pinch_out' | 'two_finger_scroll' | 'two_finger_tap' | 'three_finger_swipe_down' | 'three_finger_swipe_up' | 'three_finger_tap' | 'quick_settings' | 'notification_shade';
+    type: 'touch' | 'touch_down' | 'touch_move' | 'touch_up' | 'swipe' | 'key' | 'text' | 'longpress' | 'pinch_in' | 'pinch_out' | 'two_finger_scroll' | 'two_finger_tap' | 'three_finger_swipe_down' | 'three_finger_swipe_up' | 'three_finger_tap' | 'quick_settings' | 'notification_shade';
     x?: number;
     y?: number;
     viewWidth?: number;
@@ -656,9 +774,72 @@ class VMService {
     const vW = event.viewWidth || 1024;
     const vH = event.viewHeight || 768;
 
+    // CONTINUOUS TOUCH DOWN (Press and hold - essential for game movement joysticks and dragging)
+    if (event.type === 'touch_down' && event.x !== undefined && event.y !== undefined) {
+      const scaled = scaleCoordinate(event.x, event.y, vW, vH, 800, 600);
+      const qmpX = Math.round((scaled.x / 800) * 32767);
+      const qmpY = Math.round((scaled.y / 600) * 32767);
+      this.addLog('TOUCH', `Touch Down held at (${scaled.x}, ${scaled.y})`, 'info');
+      try {
+        await this.sendQMPCommand(status.qmpPort, {
+          execute: 'input-send-event',
+          arguments: {
+            events: [
+              { type: 'abs', data: { axis: 'x', value: qmpX } },
+              { type: 'abs', data: { axis: 'y', value: qmpY } },
+              { type: 'btn', data: { button: 'left', down: true } },
+            ],
+          },
+        });
+        return { success: true, details: `Touch Down at (${scaled.x}, ${scaled.y})` };
+      } catch (err: any) {
+        return { success: false, details: `Touch down failed: ${err.message}` };
+      }
+    }
+
+    // CONTINUOUS TOUCH MOVE (Dragging while button remains held down - analog joystick)
+    if (event.type === 'touch_move' && event.x !== undefined && event.y !== undefined) {
+      const scaled = scaleCoordinate(event.x, event.y, vW, vH, 800, 600);
+      const qmpX = Math.round((scaled.x / 800) * 32767);
+      const qmpY = Math.round((scaled.y / 600) * 32767);
+      try {
+        await this.sendQMPCommand(status.qmpPort, {
+          execute: 'input-send-event',
+          arguments: {
+            events: [
+              { type: 'abs', data: { axis: 'x', value: qmpX } },
+              { type: 'abs', data: { axis: 'y', value: qmpY } },
+            ],
+          },
+        });
+        return { success: true, details: `Touch Move to (${scaled.x}, ${scaled.y})` };
+      } catch (err: any) {
+        return { success: false, details: `Touch move failed: ${err.message}` };
+      }
+    }
+
+    // CONTINUOUS TOUCH UP (Release touch/mouse)
+    if (event.type === 'touch_up') {
+      this.addLog('TOUCH', 'Touch Up released', 'info');
+      try {
+        await this.sendQMPCommand(status.qmpPort, {
+          execute: 'input-send-event',
+          arguments: {
+            events: [
+              { type: 'btn', data: { button: 'left', down: false } },
+            ],
+          },
+        });
+        return { success: true, details: 'Touch Up released' };
+      } catch (err: any) {
+        return { success: false, details: `Touch up failed: ${err.message}` };
+      }
+    }
+
     // 1-FINGER: Single Tap / Click
     if (event.type === 'touch' && event.x !== undefined && event.y !== undefined) {
       const scaled = scaleCoordinate(event.x, event.y, vW, vH, 800, 600);
+      this.addLog('TOUCH', `1-Finger Tap at (${scaled.x}, ${scaled.y})`, 'info');
       try {
         await execAsync(`${ADB_BIN} -s ${target} shell input tap ${scaled.x} ${scaled.y}`, { timeout: 3000 });
         return { success: true, details: `1-Finger tap (${scaled.x}, ${scaled.y}) via ADB` };

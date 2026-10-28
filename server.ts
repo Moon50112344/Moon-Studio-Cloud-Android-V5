@@ -223,6 +223,27 @@ async function startServer() {
     res.json(assetManager.getProvisioningStatus());
   });
 
+  // Real-Time Server and Hardware Logs
+  app.get('/api/server-logs', async (_req, res) => {
+    try {
+      const vms = await vmService.listVMs();
+      res.json({
+        server: {
+          status: 'online',
+          uptimeSeconds: Math.round(process.uptime()),
+          port: PORT,
+          qemuInstalled: fs.existsSync('/usr/bin/qemu-system-x86_64') || fs.existsSync(path.join(process.cwd(), 'bin', 'qemu-system-x86_64')),
+          adbInstalled: fs.existsSync('/usr/bin/adb') || fs.existsSync(path.join(process.cwd(), 'bin', 'adb')),
+          activeVms: vms.filter(v => v.status === 'running' || v.status === 'booting').length,
+          totalVms: vms.length,
+        },
+        logs: vmService.getLogsList(),
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // --- Vite Dev Server Middleware Integration ---
   if (process.env.NODE_ENV !== 'production') {
     const vite = await createViteServer({
@@ -244,6 +265,10 @@ async function startServer() {
       if (vms.length === 0) {
         console.log('Bootstrapping default Moon Android VM-1...');
         await vmService.createVM('Moon Pixel Pro (Default)', 2048, 2);
+      } else if (vms[0].status === 'stopped') {
+        console.log(`Auto-starting default VM ${vms[0].id}...`);
+        vmService.addLog('SERVER', `Auto-starting default VM ${vms[0].id}...`, 'info');
+        await vmService.startVM(vms[0].id);
       }
     } catch (e: any) {
       console.warn('Initial VM auto-start info:', e.message);
@@ -259,6 +284,10 @@ async function startServer() {
       if (vms.length === 0) {
         console.log('Bootstrapping default Moon Android VM-1...');
         await vmService.createVM('Moon Pixel Pro (Default)', 2048, 2);
+      } else if (vms[0].status === 'stopped') {
+        console.log(`Auto-starting default VM ${vms[0].id}...`);
+        vmService.addLog('SERVER', `Auto-starting default VM ${vms[0].id}...`, 'info');
+        await vmService.startVM(vms[0].id);
       }
     } catch (e: any) {
       console.warn('Initial VM auto-start info:', e.message);

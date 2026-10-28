@@ -4,7 +4,7 @@
  */
 
 import React, { useState } from 'react';
-import { Cpu, HardDrive, Loader2, Smartphone, X } from 'lucide-react';
+import { CpuIcon, HardDriveIcon, SmartphoneIcon, SpinnerIcon, XIcon } from './Icons';
 
 interface CreateVMModalProps {
   isOpen: boolean;
@@ -49,7 +49,7 @@ export const CreateVMModal: React.FC<CreateVMModalProps> = ({
         <div className="flex items-center justify-between px-5 py-4 border-b border-[#1b263b] bg-[#090e1a]">
           <div className="flex items-center gap-2.5">
             <div className="w-7 h-7 rounded-lg bg-[#2f8bff]/20 text-[#2f8bff] flex items-center justify-center">
-              <Smartphone className="w-4 h-4" />
+              <SmartphoneIcon className="w-4 h-4" />
             </div>
             <h3 className="text-sm font-bold text-white">Create New Android VM</h3>
           </div>
@@ -57,7 +57,7 @@ export const CreateVMModal: React.FC<CreateVMModalProps> = ({
             onClick={onClose}
             className="p-1 rounded-md text-slate-400 hover:text-white hover:bg-[#16233d] transition-colors cursor-pointer"
           >
-            <X className="w-4 h-4" />
+            <XIcon className="w-4 h-4" />
           </button>
         </div>
 
@@ -159,7 +159,7 @@ export const CreateVMModal: React.FC<CreateVMModalProps> = ({
             >
               {isSubmitting ? (
                 <>
-                  <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                  <SpinnerIcon className="w-3.5 h-3.5 animate-spin" />
                   <span>Provisioning VM...</span>
                 </>
               ) : (

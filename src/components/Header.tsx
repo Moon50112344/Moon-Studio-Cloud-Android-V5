@@ -4,7 +4,7 @@
  */
 
 import React from 'react';
-import { Cpu, HardDrive, Plus, RefreshCw, Server, ShieldCheck, Smartphone } from 'lucide-react';
+import { CpuIcon, HardDriveIcon, PlusIcon, RefreshIcon, TerminalIcon } from './Icons';
 import { AndroidVMInfo } from '../server/vmService';
 
 interface HeaderProps {
@@ -34,7 +34,6 @@ export const Header: React.FC<HeaderProps> = ({
             alt="Moon Studio Logo"
             className="w-10 h-10 rounded-lg object-cover ring-2 ring-[#2f8bff]/40 shadow-sm"
             onError={(e) => {
-              // Graceful fallback avatar if remote logo network is slow
               (e.target as HTMLElement).style.display = 'none';
             }}
           />
@@ -58,7 +57,7 @@ export const Header: React.FC<HeaderProps> = ({
         <div className="flex items-center flex-wrap gap-2 text-xs">
           {/* Host info badge */}
           <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-[#070b14] border border-[#1e293b] text-slate-300">
-            <Server className="w-3.5 h-3.5 text-[#2f8bff]" />
+            <TerminalIcon className="w-3.5 h-3.5 text-[#2f8bff]" />
             <span className="font-medium">Debian 12 x86_64</span>
             <span className="text-slate-500">•</span>
             <span className="text-slate-400">QEMU 7.2</span>
@@ -66,32 +65,31 @@ export const Header: React.FC<HeaderProps> = ({
 
           {/* Real RAM & Disk Badges */}
           <div className="hidden lg:flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-[#070b14] border border-[#1e293b] text-slate-300">
-            <Cpu className="w-3.5 h-3.5 text-emerald-400" />
+            <CpuIcon className="w-3.5 h-3.5 text-emerald-400" />
             <span>12 GB RAM</span>
             <span className="text-slate-500">•</span>
-            <HardDrive className="w-3.5 h-3.5 text-cyan-400" />
+            <HardDriveIcon className="w-3.5 h-3.5 text-cyan-400" />
             <span>283 GB Disk</span>
           </div>
 
           {/* VM Quota badge (Max 3) */}
           <div className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-md bg-[#070b14] border border-[#1e293b]">
-            <Smartphone className="w-3.5 h-3.5 text-amber-400" />
-            <span className="text-slate-400">VM Quota:</span>
+            <span className="text-slate-400">Máy ảo:</span>
             <span className={`font-semibold ${vms.length >= 3 ? 'text-amber-400' : 'text-emerald-400'}`}>
               {vms.length}/3
             </span>
-            <span className="text-[10px] text-slate-500">({activeCount} running)</span>
+            <span className="text-[10px] text-slate-500">({activeCount} đang chạy)</span>
           </div>
 
           {/* Action buttons */}
           <button
             onClick={onRefresh}
-            title="Refresh devices and metrics"
+            title="Làm mới danh sách máy ảo"
             disabled={isRefreshing}
             className="p-2 rounded-md bg-[#131d33] hover:bg-[#1a2642] text-slate-300 hover:text-white border border-[#233152] transition-colors cursor-pointer disabled:opacity-50"
             aria-label="Refresh VM list"
           >
-            <RefreshCw className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-[#2f8bff]' : ''}`} />
+            <RefreshIcon className={`w-4 h-4 ${isRefreshing ? 'animate-spin text-[#2f8bff]' : ''}`} />
           </button>
 
           <button
@@ -99,8 +97,8 @@ export const Header: React.FC<HeaderProps> = ({
             disabled={vms.length >= 3}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-[#2f8bff] hover:bg-[#2575dc] text-white font-medium text-xs shadow-md shadow-[#2f8bff]/20 transition-all cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed"
           >
-            <Plus className="w-4 h-4" />
-            <span>New Android VM</span>
+            <PlusIcon className="w-4 h-4" />
+            <span>Tạo máy ảo mới</span>
           </button>
         </div>
       </div>

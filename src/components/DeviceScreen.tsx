@@ -6,37 +6,21 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { AndroidVMInfo } from '../server/vmService';
 import {
-  Activity,
-  AlertCircle,
-  Camera,
-  CheckCircle2,
-  ChevronDown,
-  ChevronUp,
-  Clock,
-  Expand,
-  Hand,
-  Layers,
-  LayoutGrid,
-  Loader2,
-  Maximize2,
-  Minimize2,
-  MousePointer,
-  Move,
-  Play,
-  Power,
-  RotateCw,
-  Sliders,
-  Sparkles,
-  Wifi,
-  WifiOff,
-  ZoomIn,
-  ZoomOut
-} from 'lucide-react';
+  PlayIcon,
+  PowerIcon,
+  MaximizeIcon,
+  MinimizeIcon,
+  SpinnerIcon,
+  ZoomInIcon,
+  ZoomOutIcon,
+  ChevronDownIcon,
+  ChevronUpIcon
+} from './Icons';
 
 interface DeviceScreenProps {
   vm: AndroidVMInfo | null;
   onSendInput: (input: {
-    type: 'touch' | 'swipe' | 'key' | 'text' | 'longpress' | 'pinch_in' | 'pinch_out' | 'two_finger_scroll' | 'two_finger_tap' | 'three_finger_swipe_down' | 'three_finger_swipe_up' | 'three_finger_tap' | 'quick_settings' | 'notification_shade';
+    type: 'touch' | 'touch_down' | 'touch_move' | 'touch_up' | 'swipe' | 'key' | 'text' | 'longpress' | 'pinch_in' | 'pinch_out' | 'two_finger_scroll' | 'two_finger_tap' | 'three_finger_swipe_down' | 'three_finger_swipe_up' | 'three_finger_tap' | 'quick_settings' | 'notification_shade';
     x?: number;
     y?: number;
     viewWidth?: number;
@@ -72,25 +56,18 @@ export const DeviceScreen: React.FC<DeviceScreenProps> = ({ vm, onSendInput, onS
   const [latencyMs, setLatencyMs] = useState<number>(0);
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [isStarting, setIsStarting] = useState<boolean>(false);
-  const [streamError, setStreamError] = useState<string | null>(null);
 
   // Multi-finger mode
   const [fingerMode, setFingerMode] = useState<FingerMode>('1-finger');
   const [activeTouches, setActiveTouches] = useState<TouchPoint[]>([]);
-  const [gestureNotice, setGestureNotice] = useState<string | null>(null);
 
-  // Gesture tracking state
+  // Continuous dragging / Joystick tracking state
+  const isPointerDownRef = useRef<boolean>(false);
   const dragStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
+  const lastMoveSentTimeRef = useRef<number>(0);
   const touchDistanceStartRef = useRef<number | null>(null);
 
-  const showGestureNotice = (text: string) => {
-    setGestureNotice(text);
-    setTimeout(() => {
-      setGestureNotice(prev => (prev === text ? null : prev));
-    }, 2500);
-  };
-
-  // Active streaming loop
+  // Active streaming loop with zero lag
   useEffect(() => {
     if (!vm || vm.status === 'stopped') {
       setFrameSrc('');
@@ -113,7 +90,6 @@ export const DeviceScreen: React.FC<DeviceScreenProps> = ({ vm, onSendInput, onS
       nextImg.onload = () => {
         if (!isMounted) return;
         setFrameSrc(targetUrl);
-        setStreamError(null);
         frameCount++;
 
         const now = Date.now();
@@ -125,13 +101,13 @@ export const DeviceScreen: React.FC<DeviceScreenProps> = ({ vm, onSendInput, onS
           lastFpsTime = now;
         }
 
-        // Schedule next frame rapidly
-        timeoutId = setTimeout(fetchNextFrame, 120);
+        // Rapid next frame fetching (sub-50ms)
+        timeoutId = setTimeout(fetchNextFrame, 45);
       };
 
       nextImg.onerror = () => {
         if (!isMounted) return;
-        timeoutId = setTimeout(fetchNextFrame, 500);
+        timeoutId = setTimeout(fetchNextFrame, 200);
       };
 
       nextImg.src = targetUrl;
@@ -161,16 +137,20 @@ export const DeviceScreen: React.FC<DeviceScreenProps> = ({ vm, onSendInput, onS
     setActiveTouches(list);
     setTimeout(() => {
       setActiveTouches([]);
-    }, 600);
+    }, 500);
   };
 
-  // Pointer interactions (Mouse & Pen)
+  // Continuous Pointer Down (Real game joystick / button holding)
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!imageRef.current) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (!imageRef.current || !vm || vm.status !== 'running') return;
+
     const rect = imageRef.current.getBoundingClientRect();
     const clickX = e.clientX - rect.left;
     const clickY = e.clientY - rect.top;
 
+    isPointerDownRef.current = true;
     dragStartRef.current = {
       x: clickX,
       y: clickY,
@@ -178,18 +158,61 @@ export const DeviceScreen: React.FC<DeviceScreenProps> = ({ vm, onSendInput, onS
     };
 
     spawnVisualRipples(clickX, clickY, fingerMode);
+
+    // Send immediate hardware touch_down to keep button held down in QEMU
+    onSendInput({
+      type: 'touch_down',
+      x: clickX,
+      y: clickY,
+      viewWidth: rect.width,
+      viewHeight: rect.height,
+    });
   };
 
+  // Continuous Pointer Move (Dragging joystick / analog direction)
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isPointerDownRef.current || !imageRef.current) return;
+    e.preventDefault();
+
+    const now = Date.now();
+    // Throttle to 30ms (~33Hz) for ultra-smooth responsiveness without flooding
+    if (now - lastMoveSentTimeRef.current < 30) return;
+    lastMoveSentTimeRef.current = now;
+
+    const rect = imageRef.current.getBoundingClientRect();
+    const curX = e.clientX - rect.left;
+    const curY = e.clientY - rect.top;
+
+    onSendInput({
+      type: 'touch_move',
+      x: curX,
+      y: curY,
+      viewWidth: rect.width,
+      viewHeight: rect.height,
+    });
+  };
+
+  // Pointer Up / Release
   const handlePointerUp = async (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!imageRef.current || !dragStartRef.current) return;
+    if (!isPointerDownRef.current) return;
+    isPointerDownRef.current = false;
+    e.preventDefault();
+
+    if (!imageRef.current || !dragStartRef.current) {
+      await onSendInput({ type: 'touch_up' });
+      return;
+    }
 
     const rect = imageRef.current.getBoundingClientRect();
     const endX = e.clientX - rect.left;
     const endY = e.clientY - rect.top;
     const startX = dragStartRef.current.x;
     const startY = dragStartRef.current.y;
-    const duration = Math.min(1500, Date.now() - dragStartRef.current.time);
+    const duration = Date.now() - dragStartRef.current.time;
     dragStartRef.current = null;
+
+    // Send hardware touch release
+    await onSendInput({ type: 'touch_up' });
 
     const deltaX = endX - startX;
     const deltaY = endY - startY;
@@ -197,9 +220,8 @@ export const DeviceScreen: React.FC<DeviceScreenProps> = ({ vm, onSendInput, onS
     const absDeltaY = Math.abs(deltaY);
 
     if (fingerMode === '1-finger') {
-      // 1-FINGER: Tap, Long-Press, or Swipe
-      if (duration >= 500 && absDeltaX < 20 && absDeltaY < 20) {
-        showGestureNotice('👆⏱️ Nhấn giữ 1 ngón (Long Press)');
+      if (duration >= 600 && absDeltaX < 20 && absDeltaY < 20) {
+        // Explicit long press
         await onSendInput({
           type: 'longpress',
           x: endX,
@@ -208,20 +230,8 @@ export const DeviceScreen: React.FC<DeviceScreenProps> = ({ vm, onSendInput, onS
           viewWidth: rect.width,
           viewHeight: rect.height,
         });
-      } else if (absDeltaX > 25 || absDeltaY > 25) {
-        showGestureNotice('👆 Vuốt 1 ngón (Swipe / Drag)');
-        await onSendInput({
-          type: 'swipe',
-          x1: startX,
-          y1: startY,
-          x2: endX,
-          y2: endY,
-          durationMs: duration,
-          viewWidth: rect.width,
-          viewHeight: rect.height,
-        });
-      } else {
-        showGestureNotice('👆 Chạm 1 ngón (Single Tap)');
+      } else if (absDeltaX < 15 && absDeltaY < 15) {
+        // Quick tap
         await onSendInput({
           type: 'touch',
           x: endX,
@@ -231,10 +241,8 @@ export const DeviceScreen: React.FC<DeviceScreenProps> = ({ vm, onSendInput, onS
         });
       }
     } else if (fingerMode === '2-finger') {
-      // 2-FINGERS: Dual Scroll, Pinch, or 2-Finger Tap
       if (absDeltaY > 30 && absDeltaY > absDeltaX) {
         const dir = deltaY < 0 ? 'up' : 'down';
-        showGestureNotice(`✌️ Cuộn 2 ngón ${dir === 'up' ? 'lên trên' : 'xuống dưới'}`);
         await onSendInput({
           type: 'two_finger_scroll',
           direction: dir,
@@ -243,7 +251,6 @@ export const DeviceScreen: React.FC<DeviceScreenProps> = ({ vm, onSendInput, onS
         });
       } else if (absDeltaX > 30) {
         const dir = deltaX < 0 ? 'left' : 'right';
-        showGestureNotice(`✌️ Cuộn 2 ngón sang ${dir === 'left' ? 'trái' : 'phải'}`);
         await onSendInput({
           type: 'two_finger_scroll',
           direction: dir,
@@ -251,7 +258,6 @@ export const DeviceScreen: React.FC<DeviceScreenProps> = ({ vm, onSendInput, onS
           viewHeight: rect.height,
         });
       } else {
-        showGestureNotice('✌️ Chạm 2 ngón đồng thời (Dual Tap)');
         await onSendInput({
           type: 'two_finger_tap',
           x: endX,
@@ -261,23 +267,19 @@ export const DeviceScreen: React.FC<DeviceScreenProps> = ({ vm, onSendInput, onS
         });
       }
     } else if (fingerMode === '3-finger') {
-      // 3-FINGERS: Screenshot, App Switch, or 3-Finger Tap
       if (deltaY > 35) {
-        showGestureNotice('📸 Vuốt 3 ngón xuống: Chụp ảnh màn hình Android');
         await onSendInput({
           type: 'three_finger_swipe_down',
           viewWidth: rect.width,
           viewHeight: rect.height,
         });
       } else if (deltaY < -35) {
-        showGestureNotice('🔄 Vuốt 3 ngón lên: Mở danh sách đa nhiệm (Recents)');
         await onSendInput({
           type: 'three_finger_swipe_up',
           viewWidth: rect.width,
           viewHeight: rect.height,
         });
       } else {
-        showGestureNotice('🖐️ Chạm 3 ngón (Triple Tap)');
         await onSendInput({
           type: 'three_finger_tap',
           x: endX,
@@ -294,7 +296,6 @@ export const DeviceScreen: React.FC<DeviceScreenProps> = ({ vm, onSendInput, onS
     e.preventDefault();
     if (Math.abs(e.deltaY) < 15) return;
     const dir = e.deltaY > 0 ? 'down' : 'up';
-    showGestureNotice(`✌️ Cuộn trang ${dir === 'up' ? 'lên' : 'xuống'} (Mouse Wheel)`);
     await onSendInput({
       type: 'two_finger_scroll',
       direction: dir,
@@ -335,9 +336,7 @@ export const DeviceScreen: React.FC<DeviceScreenProps> = ({ vm, onSendInput, onS
       const initialDist = touchDistanceStartRef.current;
       touchDistanceStartRef.current = null;
 
-      // Check if pinch out or pinch in
       if (initialDist > 80) {
-        showGestureNotice('🔍 Cử chỉ 2 ngón: Thu phóng (Pinch Zoom)');
         await onSendInput({
           type: 'pinch_in',
           viewWidth: rect.width,
@@ -350,18 +349,6 @@ export const DeviceScreen: React.FC<DeviceScreenProps> = ({ vm, onSendInput, onS
   // Gesture Quick Trigger Handlers
   const handleQuickGesture = async (type: any, extra?: any) => {
     if (!vm || vm.status === 'stopped') return;
-    let label = '';
-    if (type === 'pinch_out') label = '🔎 Phóng to 2 ngón (Pinch Out / Zoom In)';
-    else if (type === 'pinch_in') label = '🔍 Thu nhỏ 2 ngón (Pinch In / Zoom Out)';
-    else if (type === 'two_finger_scroll') label = `✌️ Cuộn 2 ngón (${extra?.direction || 'down'})`;
-    else if (type === 'two_finger_tap') label = '✌️ Chạm 2 ngón đồng thời (Dual Tap)';
-    else if (type === 'three_finger_swipe_down') label = '📸 Vuốt 3 ngón: Chụp ảnh màn hình Android';
-    else if (type === 'three_finger_swipe_up') label = '🔄 Vuốt 3 ngón: Mở danh sách đa nhiệm (Recents)';
-    else if (type === 'quick_settings') label = '🎛️ Vuốt 2 ngón từ trên: Cài đặt nhanh';
-    else if (type === 'notification_shade') label = '📜 Kéo thanh thông báo (Notifications)';
-    else if (type === 'longpress') label = '👆⏱️ Nhấn giữ 1 ngón (Long Press 1000ms)';
-
-    showGestureNotice(label);
     await onSendInput({ type, ...extra });
   };
 
@@ -390,11 +377,11 @@ export const DeviceScreen: React.FC<DeviceScreenProps> = ({ vm, onSendInput, onS
     return (
       <div className="flex-1 min-h-[460px] flex flex-col items-center justify-center p-8 text-center bg-[#0d1424] rounded-xl border border-[#1b263b]">
         <div className="w-16 h-16 rounded-2xl bg-[#131d33] border border-[#233152] flex items-center justify-center mb-4 text-[#2f8bff]">
-          <Activity className="w-8 h-8" />
+          <PlayIcon className="w-8 h-8" />
         </div>
-        <h3 className="text-lg font-semibold text-white mb-2">No Android VM Selected</h3>
+        <h3 className="text-lg font-semibold text-white mb-2">Chưa chọn máy ảo Android</h3>
         <p className="text-sm text-slate-400 max-w-sm">
-          Select an active virtual machine from the fleet list or create a new Android instance to start live streaming.
+          Chọn một máy ảo từ danh sách hoặc bấm Khởi động để bắt đầu truyền phát màn hình.
         </p>
       </div>
     );
@@ -403,9 +390,10 @@ export const DeviceScreen: React.FC<DeviceScreenProps> = ({ vm, onSendInput, onS
   return (
     <div
       ref={containerRef}
-      className={`relative flex flex-col bg-[#0d1424] rounded-xl border border-[#1b263b] overflow-hidden shadow-2xl ${
+      className={`relative flex flex-col bg-[#0d1424] rounded-xl border border-[#1b263b] overflow-hidden shadow-2xl select-none ${
         isFullscreen ? 'p-0 w-full h-full' : ''
       }`}
+      onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); return false; }}
     >
       {/* Top Stream Status Bar */}
       <div className="flex items-center justify-between px-4 py-2 bg-[#090e1a] border-b border-[#1b263b] text-xs">
@@ -415,11 +403,11 @@ export const DeviceScreen: React.FC<DeviceScreenProps> = ({ vm, onSendInput, onS
           {vm.status === 'running' ? (
             <span className="inline-flex items-center gap-1.5 text-emerald-400 font-medium">
               <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-              LIVE STREAM
+              LIVE STREAM (QEMU Bare-Metal)
             </span>
           ) : vm.status === 'booting' ? (
             <span className="inline-flex items-center gap-1.5 text-amber-400 font-medium">
-              <Loader2 className="w-3 h-3 animate-spin" />
+              <SpinnerIcon className="w-3 h-3 animate-spin" />
               {vm.statusMessage || 'BOOTING OS'}
             </span>
           ) : (
@@ -440,7 +428,7 @@ export const DeviceScreen: React.FC<DeviceScreenProps> = ({ vm, onSendInput, onS
                 {latencyMs}ms
               </span>
               <span className="hidden sm:inline font-mono text-[11px] text-slate-500">
-                1024×768 Native
+                800×600 Native
               </span>
             </>
           )}
@@ -448,9 +436,9 @@ export const DeviceScreen: React.FC<DeviceScreenProps> = ({ vm, onSendInput, onS
           <button
             onClick={toggleFullscreen}
             className="p-1 hover:text-white rounded hover:bg-[#1a2642] transition-colors cursor-pointer"
-            title="Toggle Fullscreen"
+            title="Toàn màn hình"
           >
-            {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+            {isFullscreen ? <MinimizeIcon className="w-4 h-4" /> : <MaximizeIcon className="w-4 h-4" />}
           </button>
         </div>
       </div>
@@ -458,15 +446,14 @@ export const DeviceScreen: React.FC<DeviceScreenProps> = ({ vm, onSendInput, onS
       {/* Multi-Finger Interaction Mode Toolbar */}
       <div className="flex flex-wrap items-center justify-between px-3 py-2 bg-[#0c1322] border-b border-[#1b263b] text-xs gap-2">
         <div className="flex items-center gap-1.5">
-          <span className="text-[11px] text-slate-400 font-medium mr-1 flex items-center gap-1">
-            <Hand className="w-3.5 h-3.5 text-[#2f8bff]" />
-            Chế độ tương tác:
+          <span className="text-[11px] text-slate-400 font-medium mr-1">
+            Chế độ:
           </span>
           <button
             onClick={() => setFingerMode('1-finger')}
             className={`px-2.5 py-1 rounded text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5 ${
               fingerMode === '1-finger'
-                ? 'bg-[#2f8bff] text-white shadow-xs shadow-[#2f8bff]/40'
+                ? 'bg-[#2f8bff] text-white shadow-xs'
                 : 'bg-[#141f36] text-slate-300 hover:bg-[#1c2c4d]'
             }`}
           >
@@ -477,7 +464,7 @@ export const DeviceScreen: React.FC<DeviceScreenProps> = ({ vm, onSendInput, onS
             onClick={() => setFingerMode('2-finger')}
             className={`px-2.5 py-1 rounded text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5 ${
               fingerMode === '2-finger'
-                ? 'bg-[#06b6d4] text-white shadow-xs shadow-[#06b6d4]/40'
+                ? 'bg-[#06b6d4] text-white shadow-xs'
                 : 'bg-[#141f36] text-slate-300 hover:bg-[#1c2c4d]'
             }`}
           >
@@ -488,7 +475,7 @@ export const DeviceScreen: React.FC<DeviceScreenProps> = ({ vm, onSendInput, onS
             onClick={() => setFingerMode('3-finger')}
             className={`px-2.5 py-1 rounded text-xs font-medium transition-all cursor-pointer flex items-center gap-1.5 ${
               fingerMode === '3-finger'
-                ? 'bg-[#10b981] text-white shadow-xs shadow-[#10b981]/40'
+                ? 'bg-[#10b981] text-white shadow-xs'
                 : 'bg-[#141f36] text-slate-300 hover:bg-[#1c2c4d]'
             }`}
           >
@@ -503,26 +490,24 @@ export const DeviceScreen: React.FC<DeviceScreenProps> = ({ vm, onSendInput, onS
             <>
               <button
                 onClick={() => handleQuickGesture('touch', { x: 400, y: 300 })}
-                className="px-2 py-0.5 rounded bg-[#17233d] hover:bg-[#203154] text-slate-300 hover:text-white text-[11px] flex items-center gap-1 transition-colors cursor-pointer"
+                className="px-2 py-0.5 rounded bg-[#17233d] hover:bg-[#203154] text-slate-300 hover:text-white text-[11px] transition-colors cursor-pointer"
                 title="Chạm vào giữa màn hình"
               >
-                <span>👆 Chạm giữa</span>
+                Chạm giữa
               </button>
               <button
                 onClick={() => handleQuickGesture('longpress', { x: 400, y: 300, durationMs: 1000 })}
-                className="px-2 py-0.5 rounded bg-[#17233d] hover:bg-[#203154] text-slate-300 hover:text-white text-[11px] flex items-center gap-1 transition-colors cursor-pointer"
-                title="Nhấn giữ 1 giây (Menu ngữ cảnh)"
+                className="px-2 py-0.5 rounded bg-[#17233d] hover:bg-[#203154] text-amber-300 hover:text-amber-200 text-[11px] transition-colors cursor-pointer"
+                title="Nhấn giữ 1 giây"
               >
-                <Clock className="w-3 h-3 text-amber-400" />
-                <span>Nhấn giữ 1s</span>
+                Nhấn giữ 1s
               </button>
               <button
                 onClick={() => handleQuickGesture('notification_shade')}
-                className="px-2 py-0.5 rounded bg-[#17233d] hover:bg-[#203154] text-slate-300 hover:text-white text-[11px] flex items-center gap-1 transition-colors cursor-pointer"
+                className="px-2 py-0.5 rounded bg-[#17233d] hover:bg-[#203154] text-slate-300 hover:text-white text-[11px] transition-colors cursor-pointer"
                 title="Kéo thanh thông báo từ trên xuống"
               >
-                <ChevronDown className="w-3 h-3 text-[#2f8bff]" />
-                <span>Kéo Thông báo</span>
+                Kéo Thông báo
               </button>
             </>
           )}
@@ -531,18 +516,18 @@ export const DeviceScreen: React.FC<DeviceScreenProps> = ({ vm, onSendInput, onS
             <>
               <button
                 onClick={() => handleQuickGesture('pinch_out')}
-                className="px-2 py-0.5 rounded bg-[#17233d] hover:bg-[#203154] text-slate-300 hover:text-white text-[11px] flex items-center gap-1 transition-colors cursor-pointer"
-                title="Phóng to 2 ngón (Pinch Out)"
+                className="px-2 py-0.5 rounded bg-[#17233d] hover:bg-[#203154] text-cyan-300 text-[11px] flex items-center gap-1 transition-colors cursor-pointer"
+                title="Phóng to 2 ngón"
               >
-                <ZoomIn className="w-3 h-3 text-cyan-400" />
+                <ZoomInIcon className="w-3 h-3" />
                 <span>Phóng to</span>
               </button>
               <button
                 onClick={() => handleQuickGesture('pinch_in')}
-                className="px-2 py-0.5 rounded bg-[#17233d] hover:bg-[#203154] text-slate-300 hover:text-white text-[11px] flex items-center gap-1 transition-colors cursor-pointer"
-                title="Thu nhỏ 2 ngón (Pinch In)"
+                className="px-2 py-0.5 rounded bg-[#17233d] hover:bg-[#203154] text-cyan-300 text-[11px] flex items-center gap-1 transition-colors cursor-pointer"
+                title="Thu nhỏ 2 ngón"
               >
-                <ZoomOut className="w-3 h-3 text-cyan-400" />
+                <ZoomOutIcon className="w-3 h-3" />
                 <span>Thu nhỏ</span>
               </button>
               <button
@@ -550,7 +535,7 @@ export const DeviceScreen: React.FC<DeviceScreenProps> = ({ vm, onSendInput, onS
                 className="px-2 py-0.5 rounded bg-[#17233d] hover:bg-[#203154] text-slate-300 hover:text-white text-[11px] flex items-center gap-1 transition-colors cursor-pointer"
                 title="Cuộn trang xuống"
               >
-                <ChevronDown className="w-3 h-3 text-slate-400" />
+                <ChevronDownIcon className="w-3 h-3" />
                 <span>Cuộn xuống</span>
               </button>
               <button
@@ -558,16 +543,15 @@ export const DeviceScreen: React.FC<DeviceScreenProps> = ({ vm, onSendInput, onS
                 className="px-2 py-0.5 rounded bg-[#17233d] hover:bg-[#203154] text-slate-300 hover:text-white text-[11px] flex items-center gap-1 transition-colors cursor-pointer"
                 title="Cuộn trang lên"
               >
-                <ChevronUp className="w-3 h-3 text-slate-400" />
+                <ChevronUpIcon className="w-3 h-3" />
                 <span>Cuộn lên</span>
               </button>
               <button
                 onClick={() => handleQuickGesture('quick_settings')}
-                className="px-2 py-0.5 rounded bg-[#17233d] hover:bg-[#203154] text-slate-300 hover:text-white text-[11px] flex items-center gap-1 transition-colors cursor-pointer"
-                title="Kéo 2 ngón từ trên xuống để mở Cài đặt nhanh"
+                className="px-2 py-0.5 rounded bg-[#17233d] hover:bg-[#203154] text-cyan-300 text-[11px] transition-colors cursor-pointer"
+                title="Kéo 2 ngón mở Cài đặt nhanh"
               >
-                <Sliders className="w-3 h-3 text-cyan-400" />
-                <span>Cài đặt nhanh</span>
+                Cài đặt nhanh
               </button>
             </>
           )}
@@ -576,52 +560,73 @@ export const DeviceScreen: React.FC<DeviceScreenProps> = ({ vm, onSendInput, onS
             <>
               <button
                 onClick={() => handleQuickGesture('three_finger_swipe_down')}
-                className="px-2 py-0.5 rounded bg-[#17233d] hover:bg-[#203154] text-slate-300 hover:text-white text-[11px] flex items-center gap-1 transition-colors cursor-pointer"
-                title="Chụp ảnh màn hình bằng vuốt 3 ngón"
+                className="px-2 py-0.5 rounded bg-[#17233d] hover:bg-[#203154] text-emerald-300 text-[11px] transition-colors cursor-pointer"
+                title="Chụp màn hình 3 ngón"
               >
-                <Camera className="w-3 h-3 text-emerald-400" />
-                <span>Chụp màn hình (3 ngón)</span>
+                Chụp màn hình (3 ngón)
               </button>
               <button
                 onClick={() => handleQuickGesture('three_finger_swipe_up')}
-                className="px-2 py-0.5 rounded bg-[#17233d] hover:bg-[#203154] text-slate-300 hover:text-white text-[11px] flex items-center gap-1 transition-colors cursor-pointer"
-                title="Vuốt 3 ngón lên để xem các ứng dụng đang chạy"
+                className="px-2 py-0.5 rounded bg-[#17233d] hover:bg-[#203154] text-emerald-300 text-[11px] transition-colors cursor-pointer"
+                title="Đa nhiệm 3 ngón"
               >
-                <Layers className="w-3 h-3 text-emerald-400" />
-                <span>Đa nhiệm (Recents)</span>
+                Đa nhiệm (Recents)
               </button>
               <button
                 onClick={() => handleQuickGesture('three_finger_tap')}
-                className="px-2 py-0.5 rounded bg-[#17233d] hover:bg-[#203154] text-slate-300 hover:text-white text-[11px] flex items-center gap-1 transition-colors cursor-pointer"
-                title="Chạm 3 ngón đồng thời"
+                className="px-2 py-0.5 rounded bg-[#17233d] hover:bg-[#203154] text-slate-300 hover:text-white text-[11px] transition-colors cursor-pointer"
+                title="Chạm 3 ngón"
               >
-                <span>🖐️ Chạm 3 ngón</span>
+                Chạm 3 ngón
               </button>
             </>
           )}
         </div>
       </div>
 
-      {/* Interactive Display Viewport */}
+      {/* Interactive Display Viewport with ContextMenu / Copy Blocking */}
       <div
         className="relative flex-1 min-h-[460px] bg-black flex items-center justify-center select-none overflow-hidden cursor-crosshair"
         onWheel={handleWheel}
+        onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); return false; }}
+        style={{
+          touchAction: 'none',
+          WebkitTouchCallout: 'none',
+          userSelect: 'none',
+        }}
       >
         {/* Real Live Frame Image */}
         {frameSrc && vm.status !== 'stopped' ? (
           <div
-            className="relative w-full h-full flex items-center justify-center"
+            className="relative w-full h-full flex items-center justify-center select-none"
             onPointerDown={handlePointerDown}
+            onPointerMove={handlePointerMove}
             onPointerUp={handlePointerUp}
+            onPointerLeave={handlePointerUp}
+            onPointerCancel={handlePointerUp}
             onTouchStart={handleTouchStart}
             onTouchEnd={handleTouchEnd}
+            onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); return false; }}
+            style={{
+              touchAction: 'none',
+              WebkitTouchCallout: 'none',
+              userSelect: 'none',
+            }}
           >
             <img
               ref={imageRef}
               src={frameSrc}
               alt="Live Android Screen"
-              className="max-w-full max-h-[580px] w-auto h-auto object-contain pointer-events-auto shadow-2xl"
+              className="max-w-full max-h-[580px] w-auto h-auto object-contain pointer-events-auto shadow-2xl select-none"
               draggable={false}
+              onDragStart={(e) => e.preventDefault()}
+              onContextMenu={(e) => { e.preventDefault(); e.stopPropagation(); return false; }}
+              style={{
+                userSelect: 'none',
+                WebkitUserSelect: 'none',
+                WebkitTouchCallout: 'none',
+                touchAction: 'none',
+              }}
             />
 
             {/* Visual Multi-Touch Feedback Ripples */}
@@ -643,21 +648,13 @@ export const DeviceScreen: React.FC<DeviceScreenProps> = ({ vm, onSendInput, onS
                 </span>
               </div>
             ))}
-
-            {/* Gesture Toast Notice */}
-            {gestureNotice && (
-              <div className="absolute top-4 left-1/2 transform -translate-x-1/2 pointer-events-none z-30 bg-[#0d1424]/95 border border-[#2f8bff]/50 text-white text-xs px-4 py-2 rounded-full shadow-2xl flex items-center gap-2 backdrop-blur-md animate-fade-in">
-                <Sparkles className="w-3.5 h-3.5 text-[#2f8bff]" />
-                <span>{gestureNotice}</span>
-              </div>
-            )}
           </div>
         ) : !frameSrc && vm.status !== 'stopped' ? (
           <div className="absolute inset-0 flex flex-col items-center justify-center p-6 text-center z-10 bg-[#070b14]">
-            <Loader2 className="w-9 h-9 text-[#2f8bff] animate-spin mb-3" />
-            <h4 className="text-sm font-semibold text-slate-200">Initializing Hardware Display</h4>
+            <SpinnerIcon className="w-9 h-9 text-[#2f8bff] animate-spin mb-3" />
+            <h4 className="text-sm font-semibold text-slate-200">Đang khởi tạo màn hình phần cứng</h4>
             <p className="text-xs text-slate-400 mt-1 max-w-xs">
-              {vm.statusMessage || 'Capturing live QEMU VESA framebuffer...'}
+              {vm.statusMessage || 'Đang kết nối VESA framebuffer từ QEMU...'}
             </p>
           </div>
         ) : null}
@@ -666,11 +663,11 @@ export const DeviceScreen: React.FC<DeviceScreenProps> = ({ vm, onSendInput, onS
         {vm.status === 'stopped' && (
           <div className="absolute inset-0 bg-[#070b14]/95 flex flex-col items-center justify-center p-6 text-center z-10">
             <div className="w-16 h-16 rounded-2xl bg-[#0d1424] border border-[#1b263b] flex items-center justify-center mb-4 text-slate-500 shadow-inner">
-              <Power className="w-8 h-8" />
+              <PowerIcon className="w-8 h-8" />
             </div>
-            <h4 className="text-base font-semibold text-white mb-1">Virtual Machine Offline</h4>
+            <h4 className="text-base font-semibold text-white mb-1">Máy ảo Android đang tắt</h4>
             <p className="text-xs text-slate-400 max-w-xs mb-5">
-              The virtual machine process is currently terminated to preserve container resources.
+              Bấm nút bên dưới để khởi động lại máy ảo và truyền phát màn hình trực tiếp.
             </p>
             <button
               onClick={handleStart}
@@ -679,13 +676,13 @@ export const DeviceScreen: React.FC<DeviceScreenProps> = ({ vm, onSendInput, onS
             >
               {isStarting ? (
                 <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  <span>Powering On...</span>
+                  <SpinnerIcon className="w-4 h-4 animate-spin" />
+                  <span>Đang khởi động...</span>
                 </>
               ) : (
                 <>
-                  <Play className="w-4 h-4 fill-current" />
-                  <span>Power On Android VM</span>
+                  <PlayIcon className="w-4 h-4 fill-current" />
+                  <span>Bật nguồn Android VM</span>
                 </>
               )}
             </button>
@@ -695,9 +692,9 @@ export const DeviceScreen: React.FC<DeviceScreenProps> = ({ vm, onSendInput, onS
         {/* Stream Hint Footer */}
         <div className="absolute bottom-2 left-2 pointer-events-none bg-black/60 backdrop-blur-xs text-[10px] text-slate-400 px-2 py-0.5 rounded border border-white/5 flex items-center gap-2">
           <span>
-            {fingerMode === '1-finger' && '👆 1 Ngón: Chạm để tap, kéo để vuốt, giữ chuột 0.5s để nhấn giữ'}
-            {fingerMode === '2-finger' && '✌️ 2 Ngón: Kéo để cuộn, lăn chuột để cuộn nhanh, chạm để chạm kép'}
-            {fingerMode === '3-finger' && '🖐️ 3 Ngón: Kéo xuống để chụp màn hình, kéo lên để mở đa nhiệm'}
+            {fingerMode === '1-finger' && '👆 Giữ chuột & kéo để di chuyển joystick / nút game • Nhấn giữ 0.6s để mở menu'}
+            {fingerMode === '2-finger' && '✌️ Kéo để cuộn • Lăn chuột để cuộn nhanh • Bấm nút để phóng to/thu nhỏ'}
+            {fingerMode === '3-finger' && '🖐️ Vuốt xuống để chụp màn hình • Vuốt lên để mở danh sách đa nhiệm'}
           </span>
         </div>
       </div>
