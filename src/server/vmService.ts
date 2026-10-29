@@ -399,34 +399,18 @@ class VMService {
 
     await new Promise((r) => setTimeout(r, 200));
 
+    this.addLog('SERVER', `Starting Android VM ${id} (${config.name})...`, 'info');
+
     // Ensure Android OS assets are ready
     if (!assetManager.checkAssetsReady()) {
-      assetManager.ensureAndroidAssetsReady().then(() => {
-        this.startVM(id).catch(() => {});
-      }).catch(() => {});
-
-      return {
-        id: config.id,
-        name: config.name,
-        status: 'booting',
-        pid: null,
-        slotIndex: config.slotIndex,
-        adbPort: config.adbPort,
-        qmpPort: config.qmpPort,
-        vncPort: config.vncPort,
-        vncDisplay: config.vncDisplay,
-        ramMb: config.ramMb,
-        cpuCores: config.cpuCores,
-        osVersion: 'Android 4.4 KitKat x86 (Hardware VESA)',
-        createdAt: config.createdAt,
-        uptimeSeconds: 0,
-        cpuPercent: 0,
-        ramUsedMb: 0,
-        diskUsedMb: 256,
-        bootCompleted: false,
-        adbConnected: false,
-        statusMessage: assetManager.getProvisioningStatus().message,
-      };
+      this.addLog('SERVER', `Android system disk images not ready. Preparing assets (kernel, initrd, system.sfs)...`, 'info');
+      const ready = await assetManager.ensureAndroidAssetsReady();
+      if (!ready) {
+        const errorMsg = assetManager.getProvisioningStatus().error || 'Failed to prepare Android OS assets';
+        this.addLog('SERVER', `Asset preparation failed: ${errorMsg}`, 'error');
+        throw new Error(errorMsg);
+      }
+      this.addLog('SERVER', `Android OS assets verified. Initializing QEMU launch...`, 'info');
     }
 
     const assets = assetManager.getAssets();
@@ -481,7 +465,14 @@ class VMService {
       ];
     }
 
-    await execAsync(cmd.join(' '));
+    try {
+      this.addLog('QEMU', `Spawning QEMU x86_64 emulator (${config.cpuCores} cores, ${config.ramMb}MB RAM)...`, 'info');
+      await execAsync(cmd.join(' '));
+      this.addLog('QEMU', `QEMU process spawned successfully for ${id}.`, 'info');
+    } catch (err: any) {
+      this.addLog('QEMU', `Failed to spawn QEMU: ${err.message}`, 'error');
+      throw new Error(`Failed to start QEMU: ${err.message}`);
+    }
 
     // Wait for the PID file to be created
     await new Promise((r) => setTimeout(r, 600));

@@ -192,13 +192,26 @@ export class AssetManager {
       console.log('[AssetManager] Extracting Android image files from ISO...');
 
       // Extract kernel, initrd.img, and system.sfs
-      await execAsync(`7z e "${isoPath}" kernel initrd.img system.sfs -o"${imagesDir}" -y 2>/dev/null || bsdtar -xf "${isoPath}" kernel initrd.img system.sfs -C "${imagesDir}" 2>/dev/null || true`);
+      try {
+        await execAsync(`7z e "${isoPath}" kernel initrd.img system.sfs -o"${imagesDir}" -y`);
+      } catch (e1: any) {
+        try {
+          await execAsync(`bsdtar -xf "${isoPath}" kernel initrd.img system.sfs -C "${imagesDir}"`);
+        } catch (e2: any) {
+          console.warn('[AssetManager] 7z/bsdtar extraction notice:', e2.message);
+        }
+      }
+
+      const ready = this.checkAssetsReady();
+      if (!ready) {
+        throw new Error('Could not extract kernel or initrd.img from Android ISO. Please verify 7z or bsdtar is installed.');
+      }
 
       this.provisioningStatus.progress = 100;
-      this.provisioningStatus.isReady = this.checkAssetsReady();
+      this.provisioningStatus.isReady = true;
       this.provisioningStatus.message = 'Android OS assets prepared successfully.';
       console.log('[AssetManager] Android OS assets prepared successfully.');
-      return this.provisioningStatus.isReady;
+      return true;
     } catch (err: any) {
       console.error('[AssetManager] Failed to prepare Android assets:', err.message);
       this.provisioningStatus.error = err.message;
