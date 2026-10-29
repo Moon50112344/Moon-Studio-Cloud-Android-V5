@@ -765,6 +765,31 @@ class VMService {
     const vW = event.viewWidth || 1024;
     const vH = event.viewHeight || 768;
 
+    // EMERGENCY CANCEL / RESET TOUCH (Force release all pointers & cancel stuck touches)
+    if (event.type === 'reset_touch') {
+      this.addLog('TOUCH', 'RESET TOUCH: Cancelling all touches and releasing hardware pointers', 'info');
+      try {
+        await this.sendQMPCommand(status.qmpPort, {
+          execute: 'input-send-event',
+          arguments: {
+            events: [
+              { type: 'btn', data: { button: 'left', down: false } },
+              { type: 'btn', data: { button: 'right', down: false } },
+              { type: 'btn', data: { button: 'middle', down: false } },
+            ],
+          },
+        });
+      } catch (err: any) {
+        console.warn('[VMService] QMP reset touch error:', err.message);
+      }
+
+      try {
+        await execAsync(`${ADB_BIN} -s ${target} shell input keyevent KEYCODE_ESCAPE 2>/dev/null || true`, { timeout: 1000 });
+      } catch {}
+
+      return { success: true, details: 'Đã hủy và giải phóng toàn bộ thao tác chạm' };
+    }
+
     // CONTINUOUS TOUCH DOWN (Press and hold - essential for game movement joysticks and dragging)
     if (event.type === 'touch_down' && event.x !== undefined && event.y !== undefined) {
       const scaled = scaleCoordinate(event.x, event.y, vW, vH, 800, 600);

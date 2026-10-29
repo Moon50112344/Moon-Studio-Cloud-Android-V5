@@ -20,14 +20,20 @@ import {
   ZoomInIcon,
   ZoomOutIcon,
   ChevronDownIcon,
-  ChevronUpIcon
+  ChevronUpIcon,
+  OneFingerIcon,
+  TwoFingerIcon,
+  ThreeFingerIcon,
+  CameraIcon,
+  LayersIcon,
+  ResetTouchIcon,
 } from './Icons';
 import { AndroidVMInfo } from '../server/vmService';
 
 interface ControlPanelProps {
   vm: AndroidVMInfo | null;
   onSendInput: (input: {
-    type: 'touch' | 'swipe' | 'key' | 'text' | 'longpress' | 'pinch_in' | 'pinch_out' | 'two_finger_scroll' | 'two_finger_tap' | 'three_finger_swipe_down' | 'three_finger_swipe_up' | 'three_finger_tap' | 'quick_settings' | 'notification_shade';
+    type: 'touch' | 'swipe' | 'key' | 'text' | 'longpress' | 'pinch_in' | 'pinch_out' | 'two_finger_scroll' | 'two_finger_tap' | 'three_finger_swipe_down' | 'three_finger_swipe_up' | 'three_finger_tap' | 'quick_settings' | 'notification_shade' | 'reset_touch';
     action?: string;
     text?: string;
     keyCode?: number | string;
@@ -195,12 +201,23 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
       <div>
         <div className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider mb-2 flex items-center justify-between">
           <span>Cử chỉ đa ngón (Multi-Touch)</span>
-          <span className="text-[10px] text-[#2f8bff] font-normal">1, 2 & 3 Ngón</span>
+          <button
+            onClick={() => onSendInput({ type: 'reset_touch' })}
+            disabled={!isEnabled}
+            className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-semibold bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 border border-rose-800 transition-colors cursor-pointer disabled:opacity-40"
+            title="Hủy toàn bộ thao tác chạm đang bị dính / kẹt"
+          >
+            <ResetTouchIcon className="w-3 h-3 text-rose-400" />
+            <span>Hủy chạm</span>
+          </button>
         </div>
 
         {/* 1-Finger Actions */}
         <div className="mb-2">
-          <div className="text-[10px] text-slate-400 font-medium mb-1">👆 1 Ngón (Single Finger)</div>
+          <div className="text-[10px] text-slate-400 font-medium mb-1 flex items-center gap-1.5">
+            <OneFingerIcon className="w-3 h-3 text-[#2f8bff]" />
+            <span>1 Ngón (Single Finger)</span>
+          </div>
           <div className="grid grid-cols-3 gap-1.5">
             <button
               onClick={() => onSendInput({ type: 'touch', x: 400, y: 300 })}
@@ -231,7 +248,10 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
 
         {/* 2-Finger Actions */}
         <div className="mb-2">
-          <div className="text-[10px] text-slate-400 font-medium mb-1">✌️ 2 Ngón (Dual Fingers)</div>
+          <div className="text-[10px] text-slate-400 font-medium mb-1 flex items-center gap-1.5">
+            <TwoFingerIcon className="w-3 h-3 text-cyan-400" />
+            <span>2 Ngón (Dual Fingers)</span>
+          </div>
           <div className="grid grid-cols-3 gap-1.5">
             <button
               onClick={() => onSendInput({ type: 'pinch_out' })}
@@ -290,23 +310,28 @@ export const ControlPanel: React.FC<ControlPanelProps> = ({
 
         {/* 3-Finger Actions */}
         <div>
-          <div className="text-[10px] text-slate-400 font-medium mb-1">🖐️ 3 Ngón (Triple Fingers)</div>
+          <div className="text-[10px] text-slate-400 font-medium mb-1 flex items-center gap-1.5">
+            <ThreeFingerIcon className="w-3 h-3 text-emerald-400" />
+            <span>3 Ngón (Triple Fingers)</span>
+          </div>
           <div className="grid grid-cols-2 gap-1.5">
             <button
               onClick={() => onSendInput({ type: 'three_finger_swipe_down' })}
               disabled={!isEnabled}
-              className="py-1.5 px-2 rounded-lg bg-[#10192e] hover:bg-[#16223e] border border-[#213052] text-emerald-300 text-[11px] transition-all cursor-pointer disabled:opacity-40 flex items-center justify-center gap-1"
+              className="py-1.5 px-2 rounded-lg bg-[#10192e] hover:bg-[#16223e] border border-[#213052] text-emerald-300 text-[11px] transition-all cursor-pointer disabled:opacity-40 flex items-center justify-center gap-1.5"
               title="Chụp ảnh màn hình bằng vuốt 3 ngón"
             >
-              <span>📸 Chụp màn hình (3 ngón)</span>
+              <CameraIcon className="w-3.5 h-3.5" />
+              <span>Chụp màn hình (3 ngón)</span>
             </button>
             <button
               onClick={() => onSendInput({ type: 'three_finger_swipe_up' })}
               disabled={!isEnabled}
-              className="py-1.5 px-2 rounded-lg bg-[#10192e] hover:bg-[#16223e] border border-[#213052] text-emerald-300 text-[11px] transition-all cursor-pointer disabled:opacity-40 flex items-center justify-center gap-1"
+              className="py-1.5 px-2 rounded-lg bg-[#10192e] hover:bg-[#16223e] border border-[#213052] text-emerald-300 text-[11px] transition-all cursor-pointer disabled:opacity-40 flex items-center justify-center gap-1.5"
               title="Mở danh sách đa nhiệm"
             >
-              <span>🔄 Đa nhiệm (3 ngón)</span>
+              <LayersIcon className="w-3.5 h-3.5" />
+              <span>Đa nhiệm (3 ngón)</span>
             </button>
           </div>
         </div>

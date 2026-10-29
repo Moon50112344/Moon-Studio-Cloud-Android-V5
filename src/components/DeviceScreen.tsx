@@ -14,13 +14,19 @@ import {
   ZoomInIcon,
   ZoomOutIcon,
   ChevronDownIcon,
-  ChevronUpIcon
+  ChevronUpIcon,
+  OneFingerIcon,
+  TwoFingerIcon,
+  ThreeFingerIcon,
+  CameraIcon,
+  LayersIcon,
+  ResetTouchIcon,
 } from './Icons';
 
 interface DeviceScreenProps {
   vm: AndroidVMInfo | null;
   onSendInput: (input: {
-    type: 'touch' | 'touch_down' | 'touch_move' | 'touch_up' | 'swipe' | 'key' | 'text' | 'longpress' | 'pinch_in' | 'pinch_out' | 'two_finger_scroll' | 'two_finger_tap' | 'three_finger_swipe_down' | 'three_finger_swipe_up' | 'three_finger_tap' | 'quick_settings' | 'notification_shade';
+    type: 'touch' | 'touch_down' | 'touch_move' | 'touch_up' | 'reset_touch' | 'swipe' | 'key' | 'text' | 'longpress' | 'pinch_in' | 'pinch_out' | 'two_finger_scroll' | 'two_finger_tap' | 'three_finger_swipe_down' | 'three_finger_swipe_up' | 'three_finger_tap' | 'quick_settings' | 'notification_shade';
     x?: number;
     y?: number;
     viewWidth?: number;
@@ -352,6 +358,15 @@ export const DeviceScreen: React.FC<DeviceScreenProps> = ({ vm, onSendInput, onS
     await onSendInput({ type, ...extra });
   };
 
+  // Emergency touch reset handler
+  const handleResetTouch = async () => {
+    isPointerDownRef.current = false;
+    dragStartRef.current = null;
+    setActiveTouches([]);
+    if (!vm || vm.status === 'stopped') return;
+    await onSendInput({ type: 'reset_touch' });
+  };
+
   const handleStart = async () => {
     if (!vm) return;
     try {
@@ -445,7 +460,7 @@ export const DeviceScreen: React.FC<DeviceScreenProps> = ({ vm, onSendInput, onS
 
       {/* Multi-Finger Interaction Mode Toolbar */}
       <div className="flex flex-wrap items-center justify-between px-3 py-2 bg-[#0c1322] border-b border-[#1b263b] text-xs gap-2">
-        <div className="flex items-center gap-1.5">
+        <div className="flex items-center gap-1.5 flex-wrap">
           <span className="text-[11px] text-slate-400 font-medium mr-1">
             Chế độ:
           </span>
@@ -457,7 +472,8 @@ export const DeviceScreen: React.FC<DeviceScreenProps> = ({ vm, onSendInput, onS
                 : 'bg-[#141f36] text-slate-300 hover:bg-[#1c2c4d]'
             }`}
           >
-            <span>👆 1 Ngón</span>
+            <OneFingerIcon className="w-3.5 h-3.5" />
+            <span>1 Ngón</span>
             <span className="text-[10px] opacity-75 hidden sm:inline">(Chạm / Kéo / Nhấn giữ)</span>
           </button>
           <button
@@ -468,7 +484,8 @@ export const DeviceScreen: React.FC<DeviceScreenProps> = ({ vm, onSendInput, onS
                 : 'bg-[#141f36] text-slate-300 hover:bg-[#1c2c4d]'
             }`}
           >
-            <span>✌️ 2 Ngón</span>
+            <TwoFingerIcon className="w-3.5 h-3.5" />
+            <span>2 Ngón</span>
             <span className="text-[10px] opacity-75 hidden sm:inline">(Thu phóng / Cuộn)</span>
           </button>
           <button
@@ -479,8 +496,19 @@ export const DeviceScreen: React.FC<DeviceScreenProps> = ({ vm, onSendInput, onS
                 : 'bg-[#141f36] text-slate-300 hover:bg-[#1c2c4d]'
             }`}
           >
-            <span>🖐️ 3 Ngón</span>
+            <ThreeFingerIcon className="w-3.5 h-3.5" />
+            <span>3 Ngón</span>
             <span className="text-[10px] opacity-75 hidden sm:inline">(Chụp màn hình / Đa nhiệm)</span>
+          </button>
+
+          {/* Emergency Touch Reset Button */}
+          <button
+            onClick={handleResetTouch}
+            className="flex items-center gap-1 px-2.5 py-1 rounded text-xs font-semibold bg-rose-950/60 hover:bg-rose-900/80 text-rose-300 border border-rose-800/80 transition-all cursor-pointer shadow-xs active:scale-95 ml-auto"
+            title="Hủy toàn bộ thao tác chạm đang bị dính / kẹt phím chuột"
+          >
+            <ResetTouchIcon className="w-3.5 h-3.5 text-rose-400" />
+            <span>Hủy chạm (Reset)</span>
           </button>
         </div>
 
@@ -560,24 +588,27 @@ export const DeviceScreen: React.FC<DeviceScreenProps> = ({ vm, onSendInput, onS
             <>
               <button
                 onClick={() => handleQuickGesture('three_finger_swipe_down')}
-                className="px-2 py-0.5 rounded bg-[#17233d] hover:bg-[#203154] text-emerald-300 text-[11px] transition-colors cursor-pointer"
+                className="px-2 py-0.5 rounded bg-[#17233d] hover:bg-[#203154] text-emerald-300 text-[11px] flex items-center gap-1 transition-colors cursor-pointer"
                 title="Chụp màn hình 3 ngón"
               >
-                Chụp màn hình (3 ngón)
+                <CameraIcon className="w-3 h-3" />
+                <span>Chụp màn hình (3 ngón)</span>
               </button>
               <button
                 onClick={() => handleQuickGesture('three_finger_swipe_up')}
-                className="px-2 py-0.5 rounded bg-[#17233d] hover:bg-[#203154] text-emerald-300 text-[11px] transition-colors cursor-pointer"
+                className="px-2 py-0.5 rounded bg-[#17233d] hover:bg-[#203154] text-emerald-300 text-[11px] flex items-center gap-1 transition-colors cursor-pointer"
                 title="Đa nhiệm 3 ngón"
               >
-                Đa nhiệm (Recents)
+                <LayersIcon className="w-3 h-3" />
+                <span>Đa nhiệm (Recents)</span>
               </button>
               <button
                 onClick={() => handleQuickGesture('three_finger_tap')}
-                className="px-2 py-0.5 rounded bg-[#17233d] hover:bg-[#203154] text-slate-300 hover:text-white text-[11px] transition-colors cursor-pointer"
+                className="px-2 py-0.5 rounded bg-[#17233d] hover:bg-[#203154] text-slate-300 hover:text-white text-[11px] flex items-center gap-1 transition-colors cursor-pointer"
                 title="Chạm 3 ngón"
               >
-                Chạm 3 ngón
+                <ThreeFingerIcon className="w-3 h-3" />
+                <span>Chạm 3 ngón</span>
               </button>
             </>
           )}
@@ -692,9 +723,9 @@ export const DeviceScreen: React.FC<DeviceScreenProps> = ({ vm, onSendInput, onS
         {/* Stream Hint Footer */}
         <div className="absolute bottom-2 left-2 pointer-events-none bg-black/60 backdrop-blur-xs text-[10px] text-slate-400 px-2 py-0.5 rounded border border-white/5 flex items-center gap-2">
           <span>
-            {fingerMode === '1-finger' && '👆 Giữ chuột & kéo để di chuyển joystick / nút game • Nhấn giữ 0.6s để mở menu'}
-            {fingerMode === '2-finger' && '✌️ Kéo để cuộn • Lăn chuột để cuộn nhanh • Bấm nút để phóng to/thu nhỏ'}
-            {fingerMode === '3-finger' && '🖐️ Vuốt xuống để chụp màn hình • Vuốt lên để mở danh sách đa nhiệm'}
+            {fingerMode === '1-finger' && 'Giữ chuột & kéo để di chuyển joystick / nút game • Nhấn giữ 0.6s để mở menu'}
+            {fingerMode === '2-finger' && 'Kéo để cuộn • Lăn chuột để cuộn nhanh • Bấm nút để phóng to/thu nhỏ'}
+            {fingerMode === '3-finger' && 'Vuốt xuống để chụp màn hình • Vuốt lên để mở danh sách đa nhiệm'}
           </span>
         </div>
       </div>

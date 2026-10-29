@@ -219,3 +219,52 @@ export const InfoIcon: React.FC<IconProps> = ({ className = 'w-4 h-4', ...props 
   </svg>
 );
 
+export const OneFingerIcon: React.FC<IconProps> = ({ className = 'w-4 h-4', ...props }) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} {...props}>
+    <path d="M12 2a2 2 0 0 1 2 2v8a2 2 0 0 1-4 0V4a2 2 0 0 1 2-2Z" />
+    <path d="M10 10.5V8a2 2 0 0 0-4 0v5a7 7 0 0 0 7 7h1a7 7 0 0 0 7-7v-3a2 2 0 0 0-4 0v.5" />
+  </svg>
+);
+
+export const TwoFingerIcon: React.FC<IconProps> = ({ className = 'w-4 h-4', ...props }) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} {...props}>
+    <path d="M9 2a1.5 1.5 0 0 1 1.5 1.5V11a1.5 1.5 0 0 1-3 0V3.5A1.5 1.5 0 0 1 9 2Z" />
+    <path d="M14 4a1.5 1.5 0 0 1 1.5 1.5V11a1.5 1.5 0 0 1-3 0V5.5A1.5 1.5 0 0 1 14 4Z" />
+    <path d="M7.5 11V9a1.5 1.5 0 0 0-3 0v4a7 7 0 0 0 7 7h1a7 7 0 0 0 7-7v-2a1.5 1.5 0 0 0-3 0v1" />
+  </svg>
+);
+
+export const ThreeFingerIcon: React.FC<IconProps> = ({ className = 'w-4 h-4', ...props }) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} {...props}>
+    <path d="M7 4a1.2 1.2 0 0 1 1.2 1.2V11a1.2 1.2 0 0 1-2.4 0V5.2A1.2 1.2 0 0 1 7 4Z" />
+    <path d="M12 2a1.2 1.2 0 0 1 1.2 1.2V11a1.2 1.2 0 0 1-2.4 0V3.2A1.2 1.2 0 0 1 12 2Z" />
+    <path d="M17 4a1.2 1.2 0 0 1 1.2 1.2V11a1.2 1.2 0 0 1-2.4 0V5.2A1.2 1.2 0 0 1 17 4Z" />
+    <path d="M5.8 11V9.5a1.2 1.2 0 0 0-2.4 0v3.5a7 7 0 0 0 7 7h1.5a7 7 0 0 0 7-7V11" />
+  </svg>
+);
+
+export const CameraIcon: React.FC<IconProps> = ({ className = 'w-4 h-4', ...props }) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} {...props}>
+    <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z" />
+    <circle cx="12" cy="13" r="3" />
+  </svg>
+);
+
+export const LayersIcon: React.FC<IconProps> = ({ className = 'w-4 h-4', ...props }) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} {...props}>
+    <path d="m12.83 2.18a2 2 0 0 0-1.66 0L2.6 6.08a1 1 0 0 0 0 1.83l8.58 3.91a2 2 0 0 0 1.66 0l8.58-3.9a1 1 0 0 0 0-1.83Z" />
+    <path d="m22 12.5-9.17 4.16a2 2 0 0 1-1.66 0L2 12.5" />
+    <path d="m22 17.5-9.17 4.16a2 2 0 0 1-1.66 0L2 17.5" />
+  </svg>
+);
+
+export const ResetTouchIcon: React.FC<IconProps> = ({ className = 'w-4 h-4', ...props }) => (
+  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} {...props}>
+    <circle cx="12" cy="12" r="10" />
+    <line x1="4.93" y1="4.93" x2="19.07" y2="19.07" />
+    <path d="M12 8v4" />
+    <path d="M12 16h.01" />
+  </svg>
+);
+
+
